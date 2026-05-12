@@ -1545,7 +1545,12 @@ function toast(msg) {
 const SYNC_URL_KEY = 'dismissflow_sync_url_v1';
 const POLL_INTERVAL_MS = 8000;
 
-let syncUrl = localStorage.getItem(SYNC_URL_KEY) || '';
+// Default Apps Script Web App URL — used when no custom URL is set in localStorage.
+// Hardcoded so parents/teachers visiting the public link get auto-connected and live updates work
+// out of the box. To use a different sheet, an admin pastes a URL in Setup → Google Sheet Sync.
+const DEFAULT_SYNC_URL = 'https://script.google.com/macros/s/AKfycbynWALO4idzN9YyMyjQoETX0uahbvdvDedYf-ojQPvRwglfFozVmT5L_v1oqbRTtTp8xA/exec';
+
+let syncUrl = localStorage.getItem(SYNC_URL_KEY) || DEFAULT_SYNC_URL;
 let syncPollTimer = null;
 let syncInflight = false;
 let lastSyncSig = '';
@@ -1870,12 +1875,13 @@ document.getElementById('copyParentLinkBtn').onclick = () => {
 };
 document.getElementById('openParentLinkBtn').onclick = () => window.open(parentLink, '_blank');
 
-// Refresh "time ago" labels every 20s
+// Refresh "time ago" labels every 20s so the parent footer and card timestamps stay fresh
 setInterval(() => {
   if (state.items.some(i => i.last_updated_at)) {
     renderAdmin();
     renderDisplay();
     renderStaff();
+    renderParent();
     const lastIso = state.items.map(i => i.last_updated_at).filter(Boolean).sort().pop();
     if (lastIso) document.getElementById('lastUpdated').textContent = timeAgo(lastIso);
   }
