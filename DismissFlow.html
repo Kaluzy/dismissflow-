@@ -368,65 +368,272 @@
   .column.col-muted .card { background: rgba(75,85,99,0.2); }
   body.display-mode .column.col-muted { opacity: 0.5; }
 
-  /* ---------- Parent View ---------- */
+  /* ---------- Parent View (airport-board aesthetic, mobile-tuned) ---------- */
   body.parent-locked .nav,
   body.parent-locked #addItemBtn,
   body.parent-locked #resetBtn,
   body.parent-locked #syncIndicator { display: none !important; }
-  body.parent-locked .topbar { padding: 16px 20px; }
-  body.parent-mode main { max-width: 720px; padding: 16px; }
-  .parent-board { display: flex; flex-direction: column; gap: 14px; }
-  .parent-section {
-    background: var(--bg-2);
-    border: 1px solid var(--border);
+  body.parent-locked,
+  body.parent-mode { background: #000; }
+  body.parent-mode .topbar { background: #000; border-bottom: 1px solid #1a1a1a; }
+  body.parent-mode main { max-width: 760px; padding: 14px; background: #000; }
+  body.parent-mode .parent-board { display: flex; flex-direction: column; gap: 14px; }
+
+  /* "Your Bus" hero card */
+  .your-bus-card {
+    background: linear-gradient(135deg, #0a1722, #0d1a26);
+    border: 2px solid var(--accent);
+    border-radius: 20px;
+    padding: 22px 20px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    transition: border-color 0.3s, background 0.3s;
+  }
+  .your-bus-card .yb-swatch {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    border: 3px solid rgba(255,255,255,0.18);
+    flex-shrink: 0;
+  }
+  .your-bus-card .yb-body { flex: 1; min-width: 0; }
+  .your-bus-card .yb-label {
+    font-size: 11px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  .your-bus-card .yb-name {
+    font-size: 32px;
+    font-weight: 800;
+    line-height: 1.05;
+    color: #fff;
+  }
+  .your-bus-card .yb-status {
+    font-size: 16px;
+    color: #cbd5e1;
+    margin-top: 8px;
+    font-weight: 600;
+  }
+  .your-bus-card .yb-unfav {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #fbbf24;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    font-size: 22px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .your-bus-card.is-arrived { border-color: var(--arrived); background: linear-gradient(135deg, #062118, #082a1f); }
+  .your-bus-card.is-arrived .yb-label { color: var(--arrived); }
+  .your-bus-card.is-arrived .yb-status { color: #86efac; font-size: 18px; }
+  .your-bus-card.is-last-call { border-color: var(--last_call); background: linear-gradient(135deg, #2a1f08, #2e220a); animation: yb-pulse 1.4s infinite; }
+  .your-bus-card.is-last-call .yb-label { color: var(--last_call); }
+  .your-bus-card.is-last-call .yb-status { color: #fcd34d; font-size: 18px; }
+  .your-bus-card.is-issue { border-color: var(--issue); background: linear-gradient(135deg, #2a0a0a, #2e0e0e); }
+  .your-bus-card.is-issue .yb-label { color: var(--issue); }
+  .your-bus-card.is-issue .yb-status { color: #fca5a5; }
+  .your-bus-card.is-departed { opacity: 0.55; border-color: #333; background: #0a0a0a; }
+  .your-bus-card.is-waiting { border-color: #2a3a5e; }
+  @keyframes yb-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(251,191,36,0.4); }
+    50%      { box-shadow: 0 0 0 16px rgba(251,191,36,0); }
+  }
+
+  /* Hint banner when no favorite is set */
+  .parent-hint {
+    background: rgba(76,195,255,0.06);
+    border: 1px dashed rgba(76,195,255,0.3);
+    padding: 14px 16px;
     border-radius: 14px;
+    font-size: 14px;
+    color: #cbd5e1;
+    text-align: center;
+  }
+
+  /* Sections in parent mode */
+  body.parent-mode .parent-section {
+    background: #0a0a0a;
+    border: 1px solid #1a1a1a;
+    border-radius: 18px;
     padding: 18px;
   }
-  .parent-section h2 {
+  body.parent-mode .parent-section h2 {
     margin: 0 0 10px 0;
-    font-size: 14px;
-    letter-spacing: 1.5px;
+    font-size: 13px;
+    letter-spacing: 2.5px;
     text-transform: uppercase;
     display: flex;
     align-items: baseline;
     gap: 10px;
+    font-weight: 800;
   }
-  .parent-section h2 .count {
-    font-size: 12px;
-    color: var(--text-dim);
-    font-weight: 600;
-  }
-  .parent-section.releasing { border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.05); }
-  .parent-section.releasing h2 { color: var(--arrived); }
-  .parent-section.last-call { border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.05); }
-  .parent-section.last-call h2 { color: var(--last_call); }
-  .parent-section.issue { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.05); }
-  .parent-section.issue h2 { color: var(--issue); }
-  .parent-section.waiting h2 { color: var(--text-dim); }
-  .parent-section.departed { opacity: 0.55; }
-  .parent-section .helper {
+  body.parent-mode .parent-section h2 .count {
     font-size: 13px;
-    color: var(--text-dim);
-    margin-bottom: 10px;
+    color: var(--muted);
+    font-weight: 700;
+    background: #1a1a1a;
+    padding: 2px 10px;
+    border-radius: 999px;
   }
-  .parent-item {
+  body.parent-mode .parent-section.releasing {
+    border-color: rgba(52,211,153,0.5);
+    background: linear-gradient(180deg, rgba(52,211,153,0.08), #0a0a0a 60%);
+  }
+  body.parent-mode .parent-section.releasing h2 { color: var(--arrived); }
+  body.parent-mode .parent-section.last-call {
+    border-color: rgba(251,191,36,0.5);
+    background: linear-gradient(180deg, rgba(251,191,36,0.12), #0a0a0a 60%);
+    animation: section-pulse 1.8s infinite;
+  }
+  body.parent-mode .parent-section.last-call h2 { color: var(--last_call); }
+  body.parent-mode .parent-section.issue {
+    border-color: rgba(239,68,68,0.5);
+    background: linear-gradient(180deg, rgba(239,68,68,0.08), #0a0a0a 60%);
+  }
+  body.parent-mode .parent-section.issue h2 { color: var(--issue); }
+  body.parent-mode .parent-section.waiting h2 { color: var(--text-dim); }
+  body.parent-mode .parent-section.departed {
+    background: transparent;
+    border: 1px dashed #1a1a1a;
+    padding: 14px 18px;
+  }
+  body.parent-mode .parent-section.departed h2 { color: var(--muted); font-size: 11px; }
+  body.parent-mode .parent-section .helper {
+    font-size: 14px;
+    color: #cbd5e1;
+    margin-bottom: 14px;
+    font-weight: 500;
+  }
+  @keyframes section-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(251,191,36,0.3); }
+    50%      { box-shadow: 0 0 0 10px rgba(251,191,36,0); }
+  }
+
+  /* Big rows (Releasing Now, Last Call, Issues) */
+  body.parent-mode .parent-row-big {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 14px 10px;
-    border-top: 1px solid var(--border);
-    font-size: 18px;
+    gap: 16px;
+    padding: 16px 12px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    font-size: 22px;
+    cursor: pointer;
+    transition: background 0.15s;
   }
-  .parent-item:first-of-type { border-top: none; padding-top: 4px; }
-  .parent-item .swatch {
-    width: 18px; height: 18px; border-radius: 50%;
+  body.parent-mode .parent-row-big:first-of-type { border-top: none; }
+  body.parent-mode .parent-row-big:active { background: rgba(255,255,255,0.04); }
+  body.parent-mode .parent-row-big .swatch {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.2);
     flex-shrink: 0;
-    border: 1px solid rgba(255,255,255,0.15);
   }
-  .parent-item .name { font-weight: 600; }
-  .parent-item .route { color: var(--text-dim); font-size: 14px; font-variant-numeric: tabular-nums; }
-  .parent-item .when { margin-left: auto; font-size: 12px; color: var(--muted); }
+  body.parent-mode .parent-row-big .name {
+    font-size: 24px;
+    font-weight: 800;
+    color: #fff;
+  }
+  body.parent-mode .parent-row-big .route {
+    font-size: 17px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  body.parent-mode .parent-row-big .when {
+    margin-left: auto;
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  body.parent-mode .parent-row-big .star {
+    font-size: 22px;
+    color: rgba(255,255,255,0.15);
+    width: 26px;
+    text-align: center;
+  }
+  body.parent-mode .parent-row-big.is-favorite .star { color: #fbbf24; }
+  body.parent-mode .parent-row-big.is-favorite .name { color: #fcd34d; }
+
+  /* Chip grid (Not Arrived Yet) */
+  body.parent-mode .parent-chip-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+  }
+  body.parent-mode .parent-chip {
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  body.parent-mode .parent-chip:active { background: #181818; }
+  body.parent-mode .parent-chip .swatch {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.15);
+    flex-shrink: 0;
+  }
+  body.parent-mode .parent-chip .name { font-weight: 700; color: #fff; }
+  body.parent-mode .parent-chip .route { color: var(--text-dim); font-size: 13px; font-variant-numeric: tabular-nums; }
+  body.parent-mode .parent-chip.is-favorite {
+    border-color: #fbbf24;
+    background: rgba(251,191,36,0.06);
+  }
+
+  /* Departed compact chips */
+  body.parent-mode .parent-section.departed .parent-chip-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  body.parent-mode .parent-section.departed .parent-chip {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid #1a1a1a;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    border-radius: 999px;
+  }
+  body.parent-mode .parent-section.departed .parent-chip .swatch { width: 8px; height: 8px; border-width: 0; }
+
+  /* Footer */
+  body.parent-mode .parent-footer {
+    text-align: center;
+    margin-top: 12px;
+    padding: 14px;
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+  body.parent-mode .parent-footer .live-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--good);
+    margin-right: 6px;
+    vertical-align: middle;
+    animation: live-dot-pulse 2s infinite;
+  }
+  @keyframes live-dot-pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+    50%      { opacity: 0.5; box-shadow: 0 0 0 6px rgba(16,185,129,0); }
+  }
+
   .parent-empty { color: var(--muted); font-style: italic; padding: 4px 0; }
+
+  /* Fallback styles for parent view in non-parent-mode (admin preview when not switched) */
+  .parent-board { display: flex; flex-direction: column; gap: 14px; }
+  .parent-section { background: var(--bg-2); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+  .parent-section h2 { margin: 0 0 10px 0; font-size: 14px; letter-spacing: 1.5px; text-transform: uppercase; }
 
   /* ---------- Staff view (read-only mobile) ---------- */
   body.staff-mode main { max-width: 720px; }
@@ -1032,47 +1239,146 @@ function renderDisplay() {
   });
 }
 
+const FAVORITE_BUS_KEY = 'dismissflow_favorite_bus_v1';
+
+function getFavoriteBusId() { return localStorage.getItem(FAVORITE_BUS_KEY) || ''; }
+function setFavoriteBusId(id) {
+  if (id) localStorage.setItem(FAVORITE_BUS_KEY, id);
+  else    localStorage.removeItem(FAVORITE_BUS_KEY);
+}
+function toggleFavoriteBus(item) {
+  const cur = getFavoriteBusId();
+  if (cur === item.id) {
+    setFavoriteBusId('');
+    toast('Unpinned ' + itemLabel(item));
+  } else {
+    setFavoriteBusId(item.id);
+    toast('★ Pinned ' + itemLabel(item) + ' to top');
+  }
+  renderParent();
+}
+
+function parentStatusMessage(s) {
+  return ({
+    waiting:   { tone: 'waiting',   text: 'Bus has not arrived yet.' },
+    arrived:   { tone: 'arrived',   text: 'BUS IS HERE — pull forward now.' },
+    last_call: { tone: 'last-call', text: 'LAST CALL — final boarding now.' },
+    departed:  { tone: 'departed',  text: 'Bus has departed.' },
+    delayed:   { tone: 'issue',     text: 'Delayed — please wait.' },
+    issue:     { tone: 'issue',     text: 'Issue — see front office.' },
+    hold:      { tone: 'issue',     text: 'On hold — do not release.' },
+  })[s] || { tone: 'waiting', text: s };
+}
+
 function renderParent() {
   const root = document.getElementById('parentSections');
   root.innerHTML = '';
-  const sections = [
-    { label: 'Releasing Now',     cls: 'releasing', helper: 'Pull forward if your child rides one of these.',  filter: i => i.status === 'arrived' },
-    { label: 'Last Call — Hurry', cls: 'last-call', helper: 'Final boarding — bus leaves in moments.',         filter: i => i.status === 'last_call' },
-    { label: 'Not Arrived Yet',   cls: 'waiting',   helper: null,                                              filter: i => ['waiting','hold'].includes(i.status) },
-    { label: 'Delayed / Issue',   cls: 'issue',     helper: 'Front office is aware. Hang tight.',              filter: i => ['delayed','issue'].includes(i.status) },
-    { label: 'Already Departed',  cls: 'departed',  helper: null,                                              filter: i => i.status === 'departed' },
-  ];
 
-  sections.forEach(s => {
-    const items = state.items.filter(s.filter).sort((a,b) => a.sort_order - b.sort_order);
-    // Hide "Delayed / Issue" entirely when empty — reduces visual noise for parents
-    if (items.length === 0 && s.cls === 'issue') return;
+  const favId = getFavoriteBusId();
+  const favItem = favId ? state.items.find(i => i.id === favId) : null;
 
-    const section = document.createElement('div');
-    section.className = 'parent-section ' + s.cls;
-    section.innerHTML = `<h2>${s.label} <span class="count">${items.length}</span></h2>` +
-      (s.helper && items.length ? `<div class="helper">${s.helper}</div>` : '');
+  // 1. "Your Bus" hero (or hint banner)
+  if (favItem) {
+    const msg = parentStatusMessage(favItem.status);
+    const hero = document.createElement('div');
+    hero.className = 'your-bus-card is-' + msg.tone;
+    hero.innerHTML = `
+      <div class="yb-swatch" style="background:${colorHex(favItem.color)}"></div>
+      <div class="yb-body">
+        <div class="yb-label">Your Bus</div>
+        <div class="yb-name">${favItem.name}${favItem.route ? ' #' + favItem.route : ''}</div>
+        <div class="yb-status">${msg.text}</div>
+      </div>
+      <button class="yb-unfav" title="Unpin">★</button>
+    `;
+    hero.querySelector('.yb-unfav').onclick = (e) => {
+      e.stopPropagation();
+      toggleFavoriteBus(favItem);
+    };
+    root.appendChild(hero);
+  } else {
+    const hint = document.createElement('div');
+    hint.className = 'parent-hint';
+    hint.innerHTML = '★ <strong style="color:#fff;">Tap your child\'s bus below</strong> to pin it to the top.';
+    root.appendChild(hint);
+  }
 
-    if (items.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'parent-empty';
-      empty.textContent = '—';
-      section.appendChild(empty);
-    } else {
-      items.forEach(item => {
-        const row = document.createElement('div');
-        row.className = 'parent-item';
-        row.innerHTML = `
-          <div class="swatch" style="background:${colorHex(item.color)}"></div>
-          <span class="name">${item.name}</span>
-          ${item.route ? `<span class="route">#${item.route}</span>` : ''}
-          ${item.last_updated_at ? `<span class="when">${timeAgo(item.last_updated_at)}</span>` : ''}
-        `;
-        section.appendChild(row);
-      });
-    }
-    root.appendChild(section);
+  // 2. Releasing Now (big rows)
+  const releasing = state.items.filter(i => i.status === 'arrived').sort((a,b) => a.sort_order - b.sort_order);
+  if (releasing.length) {
+    root.appendChild(buildBigSection('Releasing Now', 'releasing', 'Pull forward if your child rides one of these.', releasing, favId));
+  }
+
+  // 3. Last Call (big rows, pulsing)
+  const lastCall = state.items.filter(i => i.status === 'last_call').sort((a,b) => a.sort_order - b.sort_order);
+  if (lastCall.length) {
+    root.appendChild(buildBigSection('Last Call · Hurry', 'last-call', 'Final boarding — bus leaves in moments.', lastCall, favId));
+  }
+
+  // 4. Issues / Delays (only if any)
+  const issues = state.items.filter(i => ['delayed','issue','hold'].includes(i.status)).sort((a,b) => a.sort_order - b.sort_order);
+  if (issues.length) {
+    root.appendChild(buildBigSection('Delayed / Issue', 'issue', 'Front office is aware. Hang tight.', issues, favId));
+  }
+
+  // 5. Not Arrived Yet (chip grid)
+  const waiting = state.items.filter(i => i.status === 'waiting').sort((a,b) => a.sort_order - b.sort_order);
+  if (waiting.length) {
+    root.appendChild(buildChipSection('Not Arrived Yet', 'waiting', waiting, favId));
+  }
+
+  // 6. Already Departed (compact pill chips)
+  const departed = state.items.filter(i => i.status === 'departed').sort((a,b) => a.sort_order - b.sort_order);
+  if (departed.length) {
+    root.appendChild(buildChipSection('Already Departed', 'departed', departed, favId));
+  }
+
+  // 7. Live footer
+  const footer = document.createElement('div');
+  footer.className = 'parent-footer';
+  const lastIso = state.items.map(i => i.last_updated_at).filter(Boolean).sort().pop();
+  footer.innerHTML = `<span class="live-dot"></span> LIVE · Updated ${lastIso ? timeAgo(lastIso) : 'just now'}`;
+  root.appendChild(footer);
+}
+
+function buildBigSection(label, cls, helper, items, favId) {
+  const section = document.createElement('div');
+  section.className = 'parent-section ' + cls;
+  section.innerHTML = `<h2>${label} <span class="count">${items.length}</span></h2>` +
+    (helper ? `<div class="helper">${helper}</div>` : '');
+  items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'parent-row-big' + (item.id === favId ? ' is-favorite' : '');
+    row.innerHTML = `
+      <div class="swatch" style="background:${colorHex(item.color)}"></div>
+      <span class="name">${item.name}</span>
+      ${item.route ? `<span class="route">#${item.route}</span>` : ''}
+      ${item.last_updated_at ? `<span class="when">${timeAgo(item.last_updated_at)}</span>` : ''}
+      <span class="star">★</span>
+    `;
+    row.onclick = () => toggleFavoriteBus(item);
+    section.appendChild(row);
   });
+  return section;
+}
+
+function buildChipSection(label, cls, items, favId) {
+  const section = document.createElement('div');
+  section.className = 'parent-section ' + cls;
+  section.innerHTML = `<h2>${label} <span class="count">${items.length}</span></h2><div class="parent-chip-grid"></div>`;
+  const grid = section.querySelector('.parent-chip-grid');
+  items.forEach(item => {
+    const chip = document.createElement('div');
+    chip.className = 'parent-chip' + (item.id === favId ? ' is-favorite' : '');
+    chip.innerHTML = `
+      <div class="swatch" style="background:${colorHex(item.color)}"></div>
+      <span class="name">${item.name}</span>
+      ${item.route ? `<span class="route">${item.route}</span>` : ''}
+    `;
+    chip.onclick = () => toggleFavoriteBus(item);
+    grid.appendChild(chip);
+  });
+  return section;
 }
 
 function renderStaff() {
