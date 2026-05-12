@@ -1,0 +1,6 @@
+.graphify_*
+graphify-out/
+.claude/
+.DS_Store
+Thumbs.db
+*.tmp

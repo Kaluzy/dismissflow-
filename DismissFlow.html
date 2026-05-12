@@ -1,0 +1,1599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>DismissFlow — Live Dismissal Board</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --bg-2: #111a2e;
+    --panel: #18233d;
+    --panel-2: #1f2c4a;
+    --border: #2a3a5e;
+    --text: #e6edf7;
+    --text-dim: #9fb0c9;
+    --muted: #6b7c98;
+    --accent: #4cc3ff;
+    --waiting: #6b7c98;
+    --arrived: #34d399;
+    --last_call: #fbbf24;
+    --departed: #4b5563;
+    --delayed: #f97316;
+    --issue: #ef4444;
+    --hold: #a78bfa;
+    --cancelled: #4b5563;
+    --good: #10b981;
+    --warn: #f59e0b;
+    --bad: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- Top Bar ---------- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .brand {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .brand .dot { color: var(--accent); }
+  .topbar .meta {
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.3;
+  }
+  .topbar .meta .date { color: var(--text); font-weight: 600; font-size: 14px; }
+  .topbar .spacer { flex: 1; }
+  .nav {
+    display: flex;
+    gap: 4px;
+    background: var(--panel);
+    padding: 4px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+  .nav button {
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    padding: 8px 14px;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .nav button:hover { color: var(--text); }
+  .nav button.active {
+    background: var(--panel-2);
+    color: var(--text);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset;
+  }
+  .topbar .btn-danger,
+  .topbar .btn-ghost {
+    padding: 9px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+  }
+  .topbar .btn-danger { border-color: rgba(239,68,68,0.4); color: #fca5a5; }
+  .topbar .btn-danger:hover { background: rgba(239,68,68,0.15); }
+  .topbar .btn-ghost:hover { background: var(--panel-2); }
+
+  /* ---------- Layout ---------- */
+  main {
+    padding: 20px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+  .columns {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 1100px) { .columns { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 640px)  { .columns { grid-template-columns: 1fr; } }
+
+  .column {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
+  }
+  .column h2 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .column h2 .pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 11px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .column h2 .dotc {
+    width: 10px; height: 10px; border-radius: 50%;
+  }
+
+  /* ---------- Card ---------- */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card .stripe {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 6px;
+  }
+  .card .row1 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-left: 6px;
+  }
+  .card .name {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .card .route {
+    font-size: 13px;
+    color: var(--text-dim);
+    background: var(--panel-2);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .card .type {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-left: auto;
+  }
+  .card .updated {
+    font-size: 11px;
+    color: var(--muted);
+    padding-left: 6px;
+  }
+  .card .actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    padding-left: 6px;
+  }
+  .card .actions button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.05s, background 0.15s;
+  }
+  .card .actions button:hover { background: #28385c; }
+  .card .actions button:active { transform: scale(0.97); }
+  .card .actions button.primary {
+    grid-column: 1 / -1;
+    background: linear-gradient(180deg, #2563eb, #1d4ed8);
+    border-color: #2563eb;
+    padding: 12px 6px;
+    font-size: 14px;
+  }
+  .card .actions button.primary:hover { filter: brightness(1.1); }
+  .card .actions button.danger { color: #fca5a5; border-color: rgba(239,68,68,0.4); }
+  .card .actions button.danger:hover { background: rgba(239,68,68,0.15); }
+  .card .actions button.warn { color: #fcd34d; border-color: rgba(251,191,36,0.4); }
+  .card .actions button.warn:hover { background: rgba(251,191,36,0.12); }
+  .card .actions button.muted { color: var(--text-dim); }
+
+  /* ---------- Sync indicator ---------- */
+  .sync-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    cursor: pointer;
+  }
+  .sync-indicator::before {
+    content: '';
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .sync-indicator.sync-ok { color: #86efac; border-color: rgba(34,197,94,0.3); }
+  .sync-indicator.sync-ok::before { background: var(--good); }
+  .sync-indicator.sync-connecting { color: #fcd34d; }
+  .sync-indicator.sync-connecting::before { background: var(--warn); animation: pulse 1s infinite; }
+  .sync-indicator.sync-error { color: #fca5a5; border-color: rgba(239,68,68,0.3); }
+  .sync-indicator.sync-error::before { background: var(--bad); }
+  .sync-indicator.sync-disabled { color: var(--muted); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* ---------- Sync config ---------- */
+  .sync-config {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .sync-config h2 { margin: 0 0 8px 0; font-size: 18px; }
+  .sync-config p { color: var(--text-dim); font-size: 13px; margin: 0 0 14px 0; }
+  .sync-config .url-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .sync-config input[type="text"] {
+    flex: 1;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 9px 12px;
+    font-size: 13px;
+    font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  }
+  .sync-config .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sync-config button {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .sync-config button:hover { background: var(--panel-2); }
+  .sync-config button.primary {
+    background: linear-gradient(180deg, #2563eb, #1d4ed8);
+    border-color: #2563eb;
+    color: white;
+  }
+  .sync-config button.danger { color: #fca5a5; border-color: rgba(239,68,68,0.4); }
+  .sync-config details { margin-top: 14px; }
+  .sync-config details summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; }
+  .sync-config pre {
+    background: #0a0e1a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 11px;
+    color: #cbd5e1;
+    overflow-x: auto;
+    max-height: 360px;
+    overflow-y: auto;
+    margin-top: 10px;
+  }
+  .sync-config ol { color: var(--text-dim); font-size: 13px; line-height: 1.7; padding-left: 20px; }
+  .sync-config ol code { background: var(--panel); padding: 2px 6px; border-radius: 4px; color: var(--accent); font-size: 12px; }
+
+  /* ---------- Drag & Drop ---------- */
+  .card[draggable="true"] { cursor: grab; }
+  .card.dragging {
+    opacity: 0.35;
+    cursor: grabbing;
+    transform: scale(0.98);
+  }
+  .card .drag-handle {
+    position: absolute;
+    top: 8px; right: 8px;
+    width: 18px; height: 18px;
+    opacity: 0.35;
+    background-image: linear-gradient(to bottom,
+      currentColor 0, currentColor 2px, transparent 2px, transparent 5px,
+      currentColor 5px, currentColor 7px, transparent 7px, transparent 10px,
+      currentColor 10px, currentColor 12px, transparent 12px);
+    background-size: 14px 12px;
+    background-repeat: no-repeat;
+    background-position: center;
+    pointer-events: none;
+  }
+  .column.drop-target {
+    background: #1f2c4a;
+    box-shadow: 0 0 0 2px var(--accent) inset;
+  }
+  .column.drop-target h2 { color: var(--accent); }
+
+  /* ---------- Display Mode ---------- */
+  body.display-mode { background: #000; }
+  body.display-mode .topbar { background: #000; border-bottom-color: #1a1a1a; }
+  body.display-mode main { max-width: none; padding: 32px; }
+  body.display-mode .column { background: #0a0a0a; border-color: #1a1a1a; border-radius: 18px; padding: 24px; }
+  body.display-mode .column h2 { font-size: 20px; letter-spacing: 2px; }
+  body.display-mode .card { background: #131313; border: 1px solid #1f1f1f; padding: 18px; }
+  body.display-mode .card .name { font-size: 26px; }
+  body.display-mode .card .route { font-size: 18px; padding: 4px 12px; }
+  body.display-mode .card .type { font-size: 13px; }
+  body.display-mode .card .updated { font-size: 14px; }
+  body.display-mode .card .actions { display: none; }
+  body.display-mode .columns { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+
+  /* Muted (e.g. Departed) column — visually de-emphasized */
+  .column.col-muted { opacity: 0.6; }
+  .column.col-muted .card { background: rgba(75,85,99,0.2); }
+  body.display-mode .column.col-muted { opacity: 0.5; }
+
+  /* ---------- Parent View ---------- */
+  body.parent-locked .nav,
+  body.parent-locked #addItemBtn,
+  body.parent-locked #resetBtn,
+  body.parent-locked #syncIndicator { display: none !important; }
+  body.parent-locked .topbar { padding: 16px 20px; }
+  body.parent-mode main { max-width: 720px; padding: 16px; }
+  .parent-board { display: flex; flex-direction: column; gap: 14px; }
+  .parent-section {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+  }
+  .parent-section h2 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .parent-section h2 .count {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  .parent-section.releasing { border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.05); }
+  .parent-section.releasing h2 { color: var(--arrived); }
+  .parent-section.last-call { border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.05); }
+  .parent-section.last-call h2 { color: var(--last_call); }
+  .parent-section.issue { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.05); }
+  .parent-section.issue h2 { color: var(--issue); }
+  .parent-section.waiting h2 { color: var(--text-dim); }
+  .parent-section.departed { opacity: 0.55; }
+  .parent-section .helper {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .parent-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 10px;
+    border-top: 1px solid var(--border);
+    font-size: 18px;
+  }
+  .parent-item:first-of-type { border-top: none; padding-top: 4px; }
+  .parent-item .swatch {
+    width: 18px; height: 18px; border-radius: 50%;
+    flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+  .parent-item .name { font-weight: 600; }
+  .parent-item .route { color: var(--text-dim); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .parent-item .when { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .parent-empty { color: var(--muted); font-style: italic; padding: 4px 0; }
+
+  /* ---------- Staff view (read-only mobile) ---------- */
+  body.staff-mode main { max-width: 720px; }
+  body.staff-mode .columns { grid-template-columns: 1fr; }
+  body.staff-mode .card .actions { display: none; }
+  body.staff-mode .card .row1 { font-size: 18px; }
+
+  /* ---------- Logs ---------- */
+  .logs-wrap {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+  }
+  .logs-wrap h2 { margin: 0 0 16px 0; font-size: 18px; }
+  table.logs {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table.logs th, table.logs td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.logs th { color: var(--text-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; }
+  table.logs td.time { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .empty { color: var(--muted); padding: 24px; text-align: center; font-style: italic; }
+
+  /* ---------- Settings ---------- */
+  .settings-wrap {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+  }
+  .settings-wrap h2 { margin: 0 0 16px 0; font-size: 18px; }
+  .settings-wrap .row {
+    display: grid;
+    grid-template-columns: 24px 1fr 120px 120px 80px;
+    gap: 10px;
+    padding: 10px;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-wrap .row.header {
+    color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-wrap input, .settings-wrap select {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 6px 8px;
+    font-size: 13px;
+    width: 100%;
+  }
+  .settings-wrap .swatch {
+    width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--border);
+  }
+  .settings-wrap .del {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: #fca5a5;
+    padding: 6px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .settings-wrap .del:hover { background: rgba(239,68,68,0.15); }
+  .settings-wrap .add-btn {
+    margin-top: 16px;
+    background: linear-gradient(180deg, #2563eb, #1d4ed8);
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* ---------- View visibility ---------- */
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ---------- Toast ---------- */
+  .toast {
+    position: fixed;
+    bottom: 24px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(-6px); }
+
+  /* ---------- Hold / Issue extra accent ---------- */
+  .card.is-issue { box-shadow: 0 0 0 1px rgba(239,68,68,0.5) inset; }
+  .card.is-delayed { box-shadow: 0 0 0 1px rgba(249,115,22,0.5) inset; }
+  .card.is-hold { box-shadow: 0 0 0 1px rgba(167,139,250,0.4) inset; }
+
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Dismiss<span class="dot">·</span>Flow</div>
+  <div class="meta">
+    <span class="date" id="todayDate">—</span>
+    <span>Last updated <span id="lastUpdated">—</span></span>
+  </div>
+  <div class="spacer"></div>
+  <div class="nav" role="tablist">
+    <button data-view="admin" class="active">Admin</button>
+    <button data-view="display">Display</button>
+    <button data-view="staff">Staff</button>
+    <button data-view="parent">Parent</button>
+    <button data-view="logs">Logs</button>
+    <button data-view="settings">Setup</button>
+  </div>
+  <span class="sync-indicator sync-disabled" id="syncIndicator" title="Click to configure Google Sheet sync">Local Only</span>
+  <button class="btn-ghost" id="addItemBtn" title="Add bus or group">+ Add</button>
+  <button class="btn-danger" id="resetBtn" title="Reset all to Waiting">Reset Day</button>
+</div>
+
+<main>
+  <!-- ADMIN -->
+  <section class="view active" id="view-admin">
+    <div class="columns" id="adminColumns"></div>
+  </section>
+
+  <!-- DISPLAY -->
+  <section class="view" id="view-display">
+    <div class="columns" id="displayColumns"></div>
+  </section>
+
+  <!-- STAFF -->
+  <section class="view" id="view-staff">
+    <div class="columns" id="staffColumns"></div>
+  </section>
+
+  <!-- PARENT -->
+  <section class="view" id="view-parent">
+    <div class="parent-board" id="parentSections"></div>
+  </section>
+
+  <!-- LOGS -->
+  <section class="view" id="view-logs">
+    <div class="logs-wrap">
+      <h2>Audit Log</h2>
+      <div id="logsBody"></div>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="view" id="view-settings">
+    <div class="sync-config">
+      <h2>Parent-Facing Link</h2>
+      <p>Share this link with parents. They'll see a read-only, mobile-friendly board — no admin controls, no settings, no logs. The page stays in sync with the Google Sheet automatically.</p>
+      <div class="url-row">
+        <input type="text" id="parentLinkUrl" readonly value="" />
+        <button class="primary" id="copyParentLinkBtn">Copy Link</button>
+        <button id="openParentLinkBtn">Open</button>
+      </div>
+      <p style="font-size:12px; margin-top:8px;">Tip: this link only works for parents when the dashboard is hosted online (GitHub Pages, Vercel, any web host). Opening it from <code>file://</code> on your computer won't reach parents on their phones.</p>
+    </div>
+    <div class="sync-config">
+      <h2>Google Sheet Sync</h2>
+      <p>Connect to a Google Sheet so the dashboard works across devices and survives browser resets. Status changes write to the sheet in real time; the dashboard polls every 8 seconds for incoming changes.</p>
+      <div class="url-row">
+        <input type="text" id="syncUrlInput" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off" autocorrect="off" />
+        <button class="primary" id="syncConnectBtn">Connect</button>
+      </div>
+      <div class="btn-row">
+        <button id="syncPullBtn">Pull from sheet now</button>
+        <button id="syncPushBtn">Push current to sheet (overwrites)</button>
+        <button class="danger" id="syncDisconnectBtn">Disconnect</button>
+      </div>
+      <div id="syncDiagnostic" style="margin-top:14px; padding:10px 12px; background:var(--panel); border:1px solid var(--border); border-radius:8px; font-size:12px; color:var(--text-dim); font-family:ui-monospace,Monaco,monospace;">Not connected.</div>
+      <details>
+        <summary>How to set this up (one-time, ~5 minutes)</summary>
+        <ol>
+          <li>Create a new Google Sheet. Name it anything (e.g., <em>DismissFlow Live</em>).</li>
+          <li>In the sheet, go to <code>Extensions → Apps Script</code>. A code editor opens.</li>
+          <li>Delete any starter code, paste the entire Apps Script below, and click the save icon.</li>
+          <li>Click <code>Deploy → New deployment</code>. Choose type <code>Web app</code>.</li>
+          <li>Set <strong>Execute as: Me</strong>, <strong>Who has access: Anyone</strong>. Click Deploy.</li>
+          <li>Authorize when prompted. Copy the resulting <em>Web app URL</em> (ends in <code>/exec</code>).</li>
+          <li>Paste it in the field above and click <strong>Connect</strong>.</li>
+          <li>On first connect, click <strong>Push current to sheet</strong> to seed the sheet with the 18 bus/group rows.</li>
+        </ol>
+        <p><strong>The Apps Script (copy this into the editor):</strong></p>
+        <button id="copyScriptBtn" style="margin-bottom:8px;">Copy Apps Script to clipboard</button>
+        <pre id="appsScriptCode"></pre>
+      </details>
+    </div>
+    <div class="settings-wrap">
+      <h2>Buses & Groups</h2>
+      <div class="row header">
+        <span></span>
+        <span>Name</span>
+        <span>Route</span>
+        <span>Type</span>
+        <span></span>
+      </div>
+      <div id="settingsBody"></div>
+      <button class="add-btn" id="addItemBtn2">+ Add Item</button>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================================
+ * DismissFlow — Live School Dismissal Dashboard
+ * Single-file MVP. State persisted in localStorage. Supabase-ready
+ * (replace _save/_load with async client calls, wire realtime subscription).
+ * ========================================================================= */
+
+const COLUMNS = [
+  { key: 'waiting',   label: 'Waiting',    color: 'var(--waiting)'   },
+  { key: 'arrived',   label: 'Arrived',    color: 'var(--arrived)'   },
+  { key: 'last_call', label: 'Last Call',  color: 'var(--last_call)' },
+  { key: 'departed',  label: 'Departed',   color: 'var(--departed)'  },
+];
+
+// Color name -> hex for the bus accent stripe
+const COLOR_MAP = {
+  white:   '#e5e7eb',
+  orange:  '#f97316',
+  red:     '#ef4444',
+  gold:    '#eab308',
+  green:   '#22c55e',
+  brown:   '#92400e',
+  silver:  '#cbd5e1',
+  purple:  '#a855f7',
+  pink:    '#ec4899',
+  navy:    '#1e3a8a',
+  blue:    '#3b82f6',
+  black:   '#1f2937',
+  gray:    '#6b7280',
+  magenta: '#d946ef',
+  cyan:    '#06b6d4',
+  yellow:  '#facc15',
+  lime:    '#84cc16',
+  none:    '#475569',
+};
+
+const SEED_ITEMS = [
+  { name: 'Car Riders', type: 'car_rider', route: '',     color: 'green'  },
+  { name: 'Patrols',    type: 'patrol',    route: '',     color: 'lime'   },
+  { name: 'Walkers',    type: 'walker',    route: '',     color: 'cyan'   },
+  { name: 'KAH',        type: 'aftercare', route: '',     color: 'yellow' },
+  { name: 'White',      type: 'bus',       route: '1305', color: 'white'  },
+  { name: 'Orange',     type: 'bus',       route: '1327', color: 'orange' },
+  { name: 'Red',        type: 'bus',       route: '1306', color: 'red'    },
+  { name: 'Gold',       type: 'bus',       route: '1330', color: 'gold'   },
+  { name: 'Green',      type: 'bus',       route: '1301', color: 'green'  },
+  { name: 'Brown',      type: 'bus',       route: '1324', color: 'brown'  },
+  { name: 'Silver',     type: 'bus',       route: '1325', color: 'silver' },
+  { name: 'Purple',     type: 'bus',       route: '1320', color: 'purple' },
+  { name: 'Pink',       type: 'bus',       route: '1303', color: 'pink'   },
+  { name: 'Navy',       type: 'bus',       route: '1812', color: 'navy'   },
+  { name: 'Blue',       type: 'bus',       route: '1321', color: 'blue'   },
+  { name: 'Black',      type: 'bus',       route: '7851', color: 'black'  },
+  { name: 'Gray',       type: 'bus',       route: '5884', color: 'gray'   },
+  { name: 'Magenta',    type: 'bus',       route: '5808', color: 'magenta'},
+];
+
+const STORAGE_KEY = 'dismissflow_state_v1';
+
+/* ---------------- State ---------------- */
+let state = {
+  items: [],       // dismissal items
+  logs: [],        // audit log
+  user: 'Office Staff', // placeholder for future auth
+};
+
+function uid() {
+  return 'i_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      state = JSON.parse(raw);
+      if (!state.items) state.items = [];
+      if (!state.logs)  state.logs  = [];
+      if (!state.user)  state.user  = 'Office Staff';
+      return;
+    }
+  } catch (e) { console.warn('Bad state, reseeding', e); }
+  state.items = SEED_ITEMS.map((s, i) => ({
+    id: uid(),
+    name: s.name,
+    type: s.type,
+    route: s.route,
+    color: s.color,
+    status: 'waiting',
+    sort_order: i,
+    last_updated_at: null,
+  }));
+  state.logs = [];
+  saveState();
+}
+
+function saveState() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  catch (e) { console.error('Save failed', e); }
+}
+
+/* ---------------- Status changes ---------------- */
+function setStatus(itemId, newStatus) {
+  const item = state.items.find(i => i.id === itemId);
+  if (!item) return;
+  if (item.status === newStatus) return;
+  const old = item.status;
+  item.status = newStatus;
+  item.last_updated_at = new Date().toISOString();
+  state.logs.unshift({
+    id: uid(),
+    item_id: item.id,
+    item_name: itemLabel(item),
+    old_status: old,
+    new_status: newStatus,
+    changed_by: state.user,
+    changed_at: item.last_updated_at,
+  });
+  if (state.logs.length > 1000) state.logs.length = 1000;
+  saveState();
+  render();
+  toast(`${itemLabel(item)} → ${statusLabel(newStatus)}`);
+  syncSetStatus(itemId, newStatus, old);
+}
+
+function resetDay() {
+  if (!confirm('Reset all items to Waiting and clear today\'s board?\n\nThe audit log is preserved.')) return;
+  state.items.forEach(i => {
+    if (i.status !== 'waiting') {
+      state.logs.unshift({
+        id: uid(),
+        item_id: i.id,
+        item_name: itemLabel(i),
+        old_status: i.status,
+        new_status: 'waiting',
+        changed_by: state.user + ' (reset)',
+        changed_at: new Date().toISOString(),
+      });
+    }
+    i.status = 'waiting';
+    i.last_updated_at = null;
+  });
+  saveState();
+  render();
+  toast('Board reset for new day');
+  if (syncUrl) syncPost({ action: 'bulk_replace', items: state.items });
+}
+
+/* ---------------- Display helpers ---------------- */
+function itemLabel(item) {
+  return item.route ? `${item.name} ${item.route}` : item.name;
+}
+
+function statusLabel(s) {
+  return ({
+    waiting: 'Waiting',
+    arrived: 'Arrived',
+    last_call: 'Last Call',
+    departed: 'Departed',
+    delayed: 'Delayed',
+    issue: 'Issue',
+    hold: 'Hold',
+  })[s] || s;
+}
+
+function timeAgo(iso) {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  const diff = (Date.now() - t) / 1000;
+  if (diff < 5) return 'just now';
+  if (diff < 60) return `${Math.floor(diff)}s ago`;
+  if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function formatTimeShort(iso) {
+  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function colorHex(c) { return COLOR_MAP[c] || COLOR_MAP.none; }
+
+/* ---------------- Rendering ---------------- */
+function render() {
+  document.getElementById('todayDate').textContent = new Date().toLocaleDateString([], {
+    weekday: 'long', month: 'long', day: 'numeric'
+  });
+  const lastIso = state.items
+    .map(i => i.last_updated_at)
+    .filter(Boolean)
+    .sort()
+    .pop();
+  document.getElementById('lastUpdated').textContent = lastIso ? timeAgo(lastIso) : '—';
+
+  renderAdmin();
+  renderDisplay();
+  renderStaff();
+  renderParent();
+  renderLogs();
+  renderSettings();
+}
+
+function renderAdmin() {
+  const root = document.getElementById('adminColumns');
+  root.innerHTML = '';
+  COLUMNS.forEach(col => {
+    const items = state.items
+      .filter(i => i.status === col.key)
+      .sort((a,b) => a.sort_order - b.sort_order);
+    const colEl = document.createElement('div');
+    colEl.className = 'column';
+    colEl.dataset.status = col.key;
+    colEl.innerHTML = `
+      <h2>
+        <span class="dotc" style="background:${col.color}"></span>
+        ${col.label}
+        <span class="pill">${items.length}</span>
+      </h2>
+    `;
+    items.forEach(item => colEl.appendChild(renderAdminCard(item)));
+    wireColumnDrop(colEl, col.key);
+    root.appendChild(colEl);
+  });
+
+  // 5th "row" — items in unusual states (delayed/issue/hold) regardless of column
+  const unusual = state.items.filter(i => ['delayed','issue','hold'].includes(i.status));
+  if (unusual.length) {
+    const wrap = document.createElement('div');
+    wrap.className = 'column';
+    wrap.style.gridColumn = '1 / -1';
+    wrap.innerHTML = `<h2><span class="dotc" style="background:var(--issue)"></span> Needs Attention <span class="pill">${unusual.length}</span></h2>`;
+    const inner = document.createElement('div');
+    inner.style.display = 'grid';
+    inner.style.gridTemplateColumns = 'repeat(auto-fill, minmax(260px, 1fr))';
+    inner.style.gap = '10px';
+    unusual.forEach(i => inner.appendChild(renderAdminCard(i)));
+    wrap.appendChild(inner);
+    root.appendChild(wrap);
+  }
+}
+
+/* ---------------- Drag & Drop ---------------- */
+let dragSourceId = null;
+
+function wireCardDrag(cardEl, item) {
+  cardEl.setAttribute('draggable', 'true');
+  cardEl.addEventListener('dragstart', e => {
+    dragSourceId = item.id;
+    cardEl.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', item.id); } catch (_) {}
+  });
+  cardEl.addEventListener('dragend', () => {
+    cardEl.classList.remove('dragging');
+    dragSourceId = null;
+    document.querySelectorAll('.column.drop-target').forEach(c => c.classList.remove('drop-target'));
+  });
+}
+
+function wireColumnDrop(colEl, targetStatus) {
+  colEl.addEventListener('dragover', e => {
+    if (!dragSourceId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    colEl.classList.add('drop-target');
+  });
+  colEl.addEventListener('dragleave', e => {
+    // Only clear when we leave the column itself, not its children
+    if (!colEl.contains(e.relatedTarget)) colEl.classList.remove('drop-target');
+  });
+  colEl.addEventListener('drop', e => {
+    e.preventDefault();
+    colEl.classList.remove('drop-target');
+    const id = dragSourceId || e.dataTransfer.getData('text/plain');
+    if (id) setStatus(id, targetStatus);
+  });
+}
+
+function renderAdminCard(item) {
+  const c = document.createElement('div');
+  c.className = 'card';
+  if (item.status === 'issue')   c.classList.add('is-issue');
+  if (item.status === 'delayed') c.classList.add('is-delayed');
+  if (item.status === 'hold')    c.classList.add('is-hold');
+
+  c.innerHTML = `
+    <div class="stripe" style="background:${colorHex(item.color)}"></div>
+    <div class="drag-handle" title="Drag to a column"></div>
+    <div class="row1">
+      <span class="name">${item.name}</span>
+      ${item.route ? `<span class="route">#${item.route}</span>` : ''}
+      <span class="type">${item.type.replace('_',' ')}</span>
+    </div>
+    <div class="updated">${item.last_updated_at ? `Updated ${timeAgo(item.last_updated_at)} · ${statusLabel(item.status)}` : statusLabel(item.status)}</div>
+    <div class="actions"></div>
+  `;
+  const actions = c.querySelector('.actions');
+  const buttons = buttonsForStatus(item.status);
+  buttons.forEach(b => {
+    const btn = document.createElement('button');
+    btn.textContent = b.label;
+    if (b.cls) btn.className = b.cls;
+    btn.onclick = () => setStatus(item.id, b.next);
+    actions.appendChild(btn);
+  });
+  wireCardDrag(c, item);
+  return c;
+}
+
+function buttonsForStatus(s) {
+  // Primary = the most likely next step. Secondary = corrections.
+  switch (s) {
+    case 'waiting':
+      return [
+        { label: 'Mark Arrived',  next: 'arrived',   cls: 'primary' },
+        { label: 'Delayed',       next: 'delayed',   cls: 'warn' },
+        { label: 'Issue',         next: 'issue',     cls: 'danger' },
+        { label: 'Hold',          next: 'hold',      cls: 'muted' },
+      ];
+    case 'arrived':
+      return [
+        { label: 'Last Call',     next: 'last_call', cls: 'primary' },
+        { label: 'Departed',      next: 'departed' },
+        { label: 'Back to Wait',  next: 'waiting',   cls: 'muted' },
+        { label: 'Issue',         next: 'issue',     cls: 'danger' },
+      ];
+    case 'last_call':
+      return [
+        { label: 'Mark Departed', next: 'departed',  cls: 'primary' },
+        { label: 'Back to Arrived', next: 'arrived', cls: 'muted' },
+        { label: 'Issue',         next: 'issue',     cls: 'danger' },
+      ];
+    case 'departed':
+      return [
+        { label: 'Undo (Back to Last Call)', next: 'last_call', cls: 'muted' },
+      ];
+    case 'delayed':
+      return [
+        { label: 'Now Arrived',   next: 'arrived',   cls: 'primary' },
+        { label: 'Issue',         next: 'issue',     cls: 'danger' },
+        { label: 'Back to Wait',  next: 'waiting',   cls: 'muted' },
+      ];
+    case 'issue':
+      return [
+        { label: 'Resolved → Arrived', next: 'arrived', cls: 'primary' },
+        { label: 'Back to Wait',  next: 'waiting',   cls: 'muted' },
+      ];
+    case 'hold':
+      return [
+        { label: 'Release → Arrived', next: 'arrived', cls: 'primary' },
+        { label: 'Back to Wait',  next: 'waiting',   cls: 'muted' },
+      ];
+    default:
+      return [{ label: 'Back to Wait', next: 'waiting', cls: 'muted' }];
+  }
+}
+
+function renderDisplay() {
+  const root = document.getElementById('displayColumns');
+  root.innerHTML = '';
+  const buckets = [
+    { label: 'Release Now',     filter: i => i.status === 'arrived',   color: 'var(--arrived)' },
+    { label: 'Last Call',       filter: i => i.status === 'last_call', color: 'var(--last_call)' },
+    { label: 'Hold in Lobby',   filter: i => ['waiting','hold'].includes(i.status), color: 'var(--waiting)' },
+    { label: 'Issues / Delays', filter: i => ['delayed','issue'].includes(i.status), color: 'var(--issue)' },
+    { label: 'Departed',        filter: i => i.status === 'departed',  color: 'var(--departed)', muted: true },
+  ];
+  buckets.forEach(b => {
+    const items = state.items.filter(b.filter).sort((a,b) => a.sort_order - b.sort_order);
+    const colEl = document.createElement('div');
+    colEl.className = 'column' + (b.muted ? ' col-muted' : '');
+    colEl.innerHTML = `
+      <h2><span class="dotc" style="background:${b.color}"></span> ${b.label} <span class="pill">${items.length}</span></h2>
+    `;
+    if (items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = '—';
+      colEl.appendChild(empty);
+    } else {
+      items.forEach(i => colEl.appendChild(renderReadCard(i)));
+    }
+    root.appendChild(colEl);
+  });
+}
+
+function renderParent() {
+  const root = document.getElementById('parentSections');
+  root.innerHTML = '';
+  const sections = [
+    { label: 'Releasing Now',     cls: 'releasing', helper: 'Pull forward if your child rides one of these.',  filter: i => i.status === 'arrived' },
+    { label: 'Last Call — Hurry', cls: 'last-call', helper: 'Final boarding — bus leaves in moments.',         filter: i => i.status === 'last_call' },
+    { label: 'Not Arrived Yet',   cls: 'waiting',   helper: null,                                              filter: i => ['waiting','hold'].includes(i.status) },
+    { label: 'Delayed / Issue',   cls: 'issue',     helper: 'Front office is aware. Hang tight.',              filter: i => ['delayed','issue'].includes(i.status) },
+    { label: 'Already Departed',  cls: 'departed',  helper: null,                                              filter: i => i.status === 'departed' },
+  ];
+
+  sections.forEach(s => {
+    const items = state.items.filter(s.filter).sort((a,b) => a.sort_order - b.sort_order);
+    // Hide "Delayed / Issue" entirely when empty — reduces visual noise for parents
+    if (items.length === 0 && s.cls === 'issue') return;
+
+    const section = document.createElement('div');
+    section.className = 'parent-section ' + s.cls;
+    section.innerHTML = `<h2>${s.label} <span class="count">${items.length}</span></h2>` +
+      (s.helper && items.length ? `<div class="helper">${s.helper}</div>` : '');
+
+    if (items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'parent-empty';
+      empty.textContent = '—';
+      section.appendChild(empty);
+    } else {
+      items.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'parent-item';
+        row.innerHTML = `
+          <div class="swatch" style="background:${colorHex(item.color)}"></div>
+          <span class="name">${item.name}</span>
+          ${item.route ? `<span class="route">#${item.route}</span>` : ''}
+          ${item.last_updated_at ? `<span class="when">${timeAgo(item.last_updated_at)}</span>` : ''}
+        `;
+        section.appendChild(row);
+      });
+    }
+    root.appendChild(section);
+  });
+}
+
+function renderStaff() {
+  const root = document.getElementById('staffColumns');
+  root.innerHTML = '';
+  const buckets = [
+    { label: 'Release Now',     filter: i => i.status === 'arrived' },
+    { label: 'Last Call',       filter: i => i.status === 'last_call' },
+    { label: 'Hold',            filter: i => ['waiting','hold'].includes(i.status) },
+    { label: 'Delayed / Issue', filter: i => ['delayed','issue'].includes(i.status) },
+    { label: 'Departed',        filter: i => i.status === 'departed', muted: true },
+  ];
+  buckets.forEach(b => {
+    const items = state.items.filter(b.filter);
+    const colEl = document.createElement('div');
+    colEl.className = 'column' + (b.muted ? ' col-muted' : '');
+    colEl.innerHTML = `<h2>${b.label} <span class="pill">${items.length}</span></h2>`;
+    if (items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = '—';
+      colEl.appendChild(empty);
+    } else {
+      items.forEach(i => colEl.appendChild(renderReadCard(i)));
+    }
+    root.appendChild(colEl);
+  });
+}
+
+function renderReadCard(item) {
+  const c = document.createElement('div');
+  c.className = 'card';
+  if (item.status === 'issue')   c.classList.add('is-issue');
+  if (item.status === 'delayed') c.classList.add('is-delayed');
+  if (item.status === 'hold')    c.classList.add('is-hold');
+  c.innerHTML = `
+    <div class="stripe" style="background:${colorHex(item.color)}"></div>
+    <div class="row1">
+      <span class="name">${item.name}</span>
+      ${item.route ? `<span class="route">#${item.route}</span>` : ''}
+      <span class="type">${item.type.replace('_',' ')}</span>
+    </div>
+    ${item.last_updated_at ? `<div class="updated">Updated ${timeAgo(item.last_updated_at)}</div>` : ''}
+  `;
+  return c;
+}
+
+function renderLogs() {
+  const body = document.getElementById('logsBody');
+  if (state.logs.length === 0) {
+    body.innerHTML = '<div class="empty">No status changes yet today.</div>';
+    return;
+  }
+  const rows = state.logs.slice(0, 200).map(l => `
+    <tr>
+      <td class="time">${formatTimeShort(l.changed_at)}</td>
+      <td>${l.item_name}</td>
+      <td>${statusLabel(l.old_status)} → <strong>${statusLabel(l.new_status)}</strong></td>
+      <td>${l.changed_by}</td>
+    </tr>
+  `).join('');
+  body.innerHTML = `
+    <table class="logs">
+      <thead><tr><th>Time</th><th>Item</th><th>Change</th><th>By</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderSettings() {
+  const body = document.getElementById('settingsBody');
+  body.innerHTML = '';
+  state.items
+    .slice()
+    .sort((a,b) => a.sort_order - b.sort_order)
+    .forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `
+        <div class="swatch" style="background:${colorHex(item.color)}"></div>
+        <input type="text" value="${escapeAttr(item.name)}" data-field="name" />
+        <input type="text" value="${escapeAttr(item.route)}" data-field="route" placeholder="Route #" />
+        <select data-field="type">
+          ${['bus','car_rider','walker','patrol','aftercare'].map(t =>
+            `<option value="${t}" ${item.type === t ? 'selected' : ''}>${t.replace('_',' ')}</option>`
+          ).join('')}
+        </select>
+        <button class="del" title="Delete">Delete</button>
+      `;
+      row.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('change', () => {
+          item[el.dataset.field] = el.value;
+          saveState();
+          render();
+          if (syncUrl) syncPost({ action: 'bulk_replace', items: state.items });
+        });
+      });
+      row.querySelector('.del').onclick = () => {
+        if (confirm(`Delete ${itemLabel(item)}?`)) {
+          state.items = state.items.filter(i => i.id !== item.id);
+          saveState();
+          render();
+          if (syncUrl) syncPost({ action: 'delete_item', id: item.id });
+        }
+      };
+      body.appendChild(row);
+    });
+}
+
+function escapeAttr(s) {
+  return String(s ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+/* ---------------- View switching ---------------- */
+function setView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  document.querySelectorAll('.nav button').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === name);
+  });
+  document.body.classList.toggle('display-mode', name === 'display');
+  document.body.classList.toggle('staff-mode',   name === 'staff');
+  document.body.classList.toggle('parent-mode',  name === 'parent');
+}
+
+/* ---------------- Add new item ---------------- */
+function addItem() {
+  const name = prompt('Bus or group name (e.g., Orange, Walkers):');
+  if (!name) return;
+  const route = prompt('Route number (leave blank for non-bus):') || '';
+  const type = prompt('Type: bus, car_rider, walker, patrol, aftercare', 'bus') || 'bus';
+  const color = prompt('Color (orange, blue, green, etc.):', name.toLowerCase()) || 'none';
+  const newItem = {
+    id: uid(),
+    name: name.trim(),
+    type: type.trim(),
+    route: route.trim(),
+    color: color.trim().toLowerCase(),
+    status: 'waiting',
+    sort_order: state.items.length,
+    last_updated_at: null,
+  };
+  state.items.push(newItem);
+  saveState();
+  render();
+  toast(`Added ${name}`);
+  if (syncUrl) syncPost({ action: 'add_item', item: newItem });
+}
+
+/* ---------------- Toast ---------------- */
+let toastTimer;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 1600);
+}
+
+/* =========================================================================
+ * Sync layer — Google Apps Script Web App backed by a Google Sheet
+ * ========================================================================= */
+
+const SYNC_URL_KEY = 'dismissflow_sync_url_v1';
+const POLL_INTERVAL_MS = 8000;
+
+let syncUrl = localStorage.getItem(SYNC_URL_KEY) || '';
+let syncPollTimer = null;
+let syncInflight = false;
+let lastSyncSig = '';
+
+function setSyncState(s, msg) {
+  const el = document.getElementById('syncIndicator');
+  if (!el) return;
+  const map = {
+    disabled:   { txt: 'Local Only',  cls: 'sync-disabled' },
+    connecting: { txt: 'Syncing…',    cls: 'sync-connecting' },
+    ok:         { txt: 'Synced',      cls: 'sync-ok' },
+    error:      { txt: 'Offline',     cls: 'sync-error' },
+  };
+  const m = map[s] || map.disabled;
+  el.textContent = msg || m.txt;
+  el.className = 'sync-indicator ' + m.cls;
+}
+
+async function syncRead({ silent = false } = {}) {
+  if (!syncUrl) return null;
+  if (syncInflight) return null;
+  syncInflight = true;
+  if (!silent) setSyncState('connecting');
+  try {
+    const r = await fetch(syncUrl + '?action=read&t=' + Date.now(), { method: 'GET' });
+    const text = await r.text();
+    if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + text.slice(0,200));
+    let data;
+    try { data = JSON.parse(text); }
+    catch (parseErr) {
+      throw new Error('Got HTML instead of JSON. Re-deploy the Apps Script with "Who has access: Anyone". First 200 chars: ' + text.slice(0,200));
+    }
+    if (data && Array.isArray(data.items)) {
+      const sig = JSON.stringify(data.items);
+      if (sig !== lastSyncSig) {
+        lastSyncSig = sig;
+        state.items = data.items.map(i => ({
+          id: i.id, name: i.name, type: i.type, route: i.route || '', color: i.color,
+          status: i.status || 'waiting',
+          sort_order: Number(i.sort_order) || 0,
+          last_updated_at: i.last_updated_at || null,
+          last_updated_by: i.last_updated_by || null,
+        }));
+        saveState();
+        render();
+      }
+      setDiagnostic('Sheet: ' + data.items.length + ' items · Local: ' + state.items.length + ' items · Last poll: ' + new Date().toLocaleTimeString());
+    }
+    setSyncState('ok');
+    return data;
+  } catch (e) {
+    console.warn('Sync read failed:', e.message || e);
+    setSyncState('error');
+    setDiagnostic('GET failed: ' + (e.message || e));
+    return null;
+  } finally {
+    syncInflight = false;
+  }
+}
+
+function setDiagnostic(msg) {
+  const el = document.getElementById('syncDiagnostic');
+  if (el) el.textContent = msg;
+}
+
+async function syncPost(payload) {
+  if (!syncUrl) return null;
+  try {
+    const r = await fetch(syncUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + text.slice(0, 200));
+    let data;
+    try { data = JSON.parse(text); }
+    catch (parseErr) {
+      // Apps Script returned HTML (usually a login redirect) — deployment not set to "Anyone"
+      throw new Error('Got HTML instead of JSON. Re-deploy the Apps Script with "Who has access: Anyone". First 200 chars: ' + text.slice(0, 200));
+    }
+    setSyncState('ok');
+    return data;
+  } catch (e) {
+    console.warn('Sync write failed for', payload.action, ':', e.message || e);
+    setSyncState('error');
+    setDiagnostic('POST failed: ' + (e.message || e));
+    return { __error: e.message || String(e) };
+  }
+}
+
+function syncSetStatus(itemId, newStatus, oldStatus) {
+  if (!syncUrl) return;
+  syncPost({
+    action: 'set_status',
+    id: itemId,
+    new_status: newStatus,
+    old_status: oldStatus,
+    changed_by: state.user || 'Office Staff',
+  });
+}
+
+async function syncPushAll() {
+  if (!syncUrl) { alert('Connect a sheet first.'); return; }
+  if (!confirm('This will OVERWRITE the Google Sheet with your current local items (' + state.items.length + ' rows). Continue?')) return;
+  setSyncState('connecting');
+  setDiagnostic('Pushing ' + state.items.length + ' items to sheet…');
+  const res = await syncPost({ action: 'bulk_replace', items: state.items });
+  console.log('[DismissFlow] bulk_replace response:', res);
+  if (res && res.ok) {
+    toast(`Pushed ${res.count || state.items.length} items to sheet`);
+    setDiagnostic('Push OK: wrote ' + (res.count || state.items.length) + ' rows at ' + new Date().toLocaleTimeString());
+    await syncRead({ silent: true });
+  } else {
+    const errMsg = (res && res.__error) ? res.__error
+                  : (res && res.error)   ? res.error
+                  : 'Unknown error. Open DevTools (F12) → Console for details.';
+    alert('Push failed:\n\n' + errMsg);
+    setDiagnostic('Push FAILED: ' + errMsg);
+  }
+}
+
+async function syncPullNow() {
+  if (!syncUrl) { alert('Connect a sheet first.'); return; }
+  const res = await syncRead();
+  if (res) toast(`Pulled ${res.items.length} items from sheet`);
+}
+
+function syncConnect() {
+  const input = document.getElementById('syncUrlInput');
+  const url = (input.value || '').trim();
+  if (!url) { alert('Paste the Apps Script Web App URL first.'); return; }
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(url)) {
+    if (!confirm('That URL doesn\'t look like an Apps Script /exec URL. Try anyway?')) return;
+  }
+  syncUrl = url;
+  localStorage.setItem(SYNC_URL_KEY, syncUrl);
+  setSyncState('connecting');
+  startSyncPoll();
+  syncRead().then(res => {
+    if (res) {
+      toast(`Connected — ${res.items.length} items in sheet`);
+      if (res.items.length === 0) {
+        if (confirm('The sheet is empty. Push current local items to it now?')) syncPushAll();
+      }
+    } else {
+      alert('Could not reach the script. Double-check the URL and that the deployment is "Anyone" access.');
+    }
+  });
+}
+
+function syncDisconnect() {
+  if (!confirm('Disconnect from the sheet? The dashboard stays working locally.')) return;
+  syncUrl = '';
+  localStorage.removeItem(SYNC_URL_KEY);
+  stopSyncPoll();
+  setSyncState('disabled');
+  document.getElementById('syncUrlInput').value = '';
+  toast('Disconnected from sheet');
+}
+
+function startSyncPoll() {
+  stopSyncPoll();
+  if (!syncUrl) return;
+  syncPollTimer = setInterval(() => {
+    if (!document.hidden) syncRead({ silent: true });
+  }, POLL_INTERVAL_MS);
+}
+function stopSyncPoll() {
+  if (syncPollTimer) clearInterval(syncPollTimer);
+  syncPollTimer = null;
+}
+
+const APPS_SCRIPT_SOURCE = `/**
+ * DismissFlow — Google Sheet sync backend.
+ * Deploy: Extensions → Apps Script → paste this → Save → Deploy → New deployment
+ * Type: Web app. Execute as: Me. Who has access: Anyone. Copy the /exec URL.
+ */
+const SHEET_NAME = 'items';
+const LOG_SHEET  = 'logs';
+const HEADERS = ['id','name','type','route','color','status','sort_order','last_updated_at','last_updated_by'];
+const LOG_HEADERS = ['changed_at','item_id','item_name','old_status','new_status','changed_by','note'];
+
+function doGet(e) {
+  const action = (e && e.parameter && e.parameter.action) || 'read';
+  if (action === 'read') return jsonOut(readAll());
+  return jsonOut({ error: 'unknown action' });
+}
+
+function doPost(e) {
+  let body;
+  try { body = JSON.parse(e.postData.contents); }
+  catch (err) { return jsonOut({ error: 'bad json' }); }
+  if (body.action === 'set_status')   return jsonOut(setStatus(body));
+  if (body.action === 'bulk_replace') return jsonOut(bulkReplace(body.items || []));
+  if (body.action === 'add_item')     return jsonOut(addItem(body.item));
+  if (body.action === 'delete_item')  return jsonOut(deleteItem(body.id));
+  return jsonOut({ error: 'unknown action' });
+}
+
+function jsonOut(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let s = ss.getSheetByName(SHEET_NAME);
+  if (!s) {
+    s = ss.insertSheet(SHEET_NAME);
+    s.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  }
+  return s;
+}
+
+function getLogSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let s = ss.getSheetByName(LOG_SHEET);
+  if (!s) {
+    s = ss.insertSheet(LOG_SHEET);
+    s.getRange(1, 1, 1, LOG_HEADERS.length).setValues([LOG_HEADERS]);
+  }
+  return s;
+}
+
+function readAll() {
+  const s = getSheet();
+  const values = s.getDataRange().getValues();
+  if (values.length < 2) return { items: [] };
+  const items = values.slice(1).map(r => ({
+    id: r[0], name: r[1], type: r[2], route: r[3] ? String(r[3]) : '',
+    color: r[4], status: r[5] || 'waiting',
+    sort_order: Number(r[6]) || 0,
+    last_updated_at: r[7] ? String(r[7]) : null,
+    last_updated_by: r[8] || null,
+  })).filter(i => i.id);
+  return { items: items, fetched_at: new Date().toISOString() };
+}
+
+function setStatus(body) {
+  const s = getSheet();
+  const values = s.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === String(body.id)) {
+      const oldStatus = values[i][5];
+      const nowIso = new Date().toISOString();
+      s.getRange(i+1, 6).setValue(body.new_status);
+      s.getRange(i+1, 8).setValue(nowIso);
+      s.getRange(i+1, 9).setValue(body.changed_by || '');
+      const itemName = values[i][1] + (values[i][3] ? ' ' + values[i][3] : '');
+      getLogSheet().appendRow([nowIso, body.id, itemName, oldStatus, body.new_status, body.changed_by || '', body.note || '']);
+      return { ok: true };
+    }
+  }
+  return { error: 'item not found: ' + body.id };
+}
+
+function bulkReplace(items) {
+  const s = getSheet();
+  s.clearContents();
+  const rows = [HEADERS];
+  items.forEach(i => rows.push([
+    i.id, i.name, i.type, i.route || '', i.color,
+    i.status || 'waiting', i.sort_order || 0, i.last_updated_at || '', i.last_updated_by || ''
+  ]));
+  s.getRange(1, 1, rows.length, HEADERS.length).setValues(rows);
+  return { ok: true, count: items.length };
+}
+
+function addItem(item) {
+  const s = getSheet();
+  s.appendRow([
+    item.id, item.name, item.type, item.route || '', item.color,
+    item.status || 'waiting', item.sort_order || 0, '', ''
+  ]);
+  return { ok: true };
+}
+
+function deleteItem(id) {
+  const s = getSheet();
+  const values = s.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === String(id)) { s.deleteRow(i+1); return { ok: true }; }
+  }
+  return { error: 'not found' };
+}
+`;
+
+/* ---------------- Wire up ---------------- */
+document.querySelectorAll('.nav button').forEach(b => {
+  b.addEventListener('click', () => setView(b.dataset.view));
+});
+document.getElementById('resetBtn').onclick = resetDay;
+document.getElementById('addItemBtn').onclick = addItem;
+document.getElementById('addItemBtn2').onclick = addItem;
+
+// Sync controls
+document.getElementById('syncConnectBtn').onclick = syncConnect;
+document.getElementById('syncDisconnectBtn').onclick = syncDisconnect;
+document.getElementById('syncPushBtn').onclick = syncPushAll;
+document.getElementById('syncPullBtn').onclick = syncPullNow;
+document.getElementById('appsScriptCode').textContent = APPS_SCRIPT_SOURCE;
+document.getElementById('copyScriptBtn').onclick = () => {
+  navigator.clipboard.writeText(APPS_SCRIPT_SOURCE).then(
+    () => toast('Apps Script copied to clipboard'),
+    () => toast('Copy failed — select the text manually')
+  );
+};
+if (syncUrl) document.getElementById('syncUrlInput').value = syncUrl;
+
+// Sync indicator click jumps to setup
+document.getElementById('syncIndicator').onclick = () => setView('settings');
+
+// Parent link — built from the current page URL
+const parentLink = window.location.origin + window.location.pathname + '?role=parent';
+document.getElementById('parentLinkUrl').value = parentLink;
+document.getElementById('copyParentLinkBtn').onclick = () => {
+  navigator.clipboard.writeText(parentLink).then(
+    () => toast('Parent link copied'),
+    () => toast('Copy failed — select the text manually')
+  );
+};
+document.getElementById('openParentLinkBtn').onclick = () => window.open(parentLink, '_blank');
+
+// Refresh "time ago" labels every 20s
+setInterval(() => {
+  if (state.items.some(i => i.last_updated_at)) {
+    renderAdmin();
+    renderDisplay();
+    renderStaff();
+    const lastIso = state.items.map(i => i.last_updated_at).filter(Boolean).sort().pop();
+    if (lastIso) document.getElementById('lastUpdated').textContent = timeAgo(lastIso);
+  }
+}, 20000);
+
+/* ---------------- Boot ---------------- */
+loadState();
+render();
+
+// Parent-mode lock: ?role=parent strips admin controls and pins the view
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('role') === 'parent') {
+  document.body.classList.add('parent-locked');
+  setView('parent');
+}
+
+if (syncUrl) {
+  setSyncState('connecting');
+  startSyncPoll();
+  syncRead();
+} else {
+  setSyncState('disabled');
+}
+
+</script>
+</body>
+</html>
