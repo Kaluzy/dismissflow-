@@ -716,6 +716,86 @@
     cursor: pointer;
   }
 
+  /* ---------- Yard View (3D scene) ---------- */
+  .yard-wrap {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 90px);
+    background: linear-gradient(180deg, #ffd9a8 0%, #ffb87a 35%, #f59e6b 65%, #d97e54 100%);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  #yardCanvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+  }
+  .yard-legend {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    background: rgba(10,15,25,0.78);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 14px 16px;
+    color: var(--text);
+    font-size: 13px;
+    max-width: 240px;
+    pointer-events: none;
+  }
+  .yard-legend-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent);
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
+  .yard-legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    color: #cbd5e1;
+  }
+  .yz-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .yard-legend-hint {
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--muted);
+    font-style: italic;
+  }
+  .yard-info-panel {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    background: rgba(10,15,25,0.92);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    padding: 18px 20px;
+    color: var(--text);
+    min-width: 280px;
+    max-width: 340px;
+    display: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .yard-info-panel.show { display: block; }
+  .yard-loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.8);
+    font-size: 14px;
+    background: rgba(0,0,0,0.3);
+    backdrop-filter: blur(4px);
+  }
+  .yard-loading.hidden { display: none; }
+
   /* ---------- View visibility ---------- */
   .view { display: none; }
   .view.active { display: block; }
@@ -757,6 +837,7 @@
   <div class="nav" role="tablist">
     <button data-view="admin" class="active">Admin</button>
     <button data-view="display">Display</button>
+    <button data-view="yard">Yard View</button>
     <button data-view="staff">Staff</button>
     <button data-view="parent">Parent</button>
     <button data-view="logs">Logs</button>
@@ -786,6 +867,25 @@
   <!-- PARENT -->
   <section class="view" id="view-parent">
     <div class="parent-board" id="parentSections"></div>
+  </section>
+
+  <!-- YARD VIEW (3D) -->
+  <section class="view" id="view-yard">
+    <div class="yard-wrap">
+      <canvas id="yardCanvas"></canvas>
+      <div class="yard-legend">
+        <div class="yard-legend-title">Live School Yard</div>
+        <div class="yard-legend-row"><span class="yz-dot" style="background:#94a3b8"></span> Depot · Waiting</div>
+        <div class="yard-legend-row"><span class="yz-dot" style="background:#34d399"></span> Loading Curb · Arrived</div>
+        <div class="yard-legend-row"><span class="yz-dot" style="background:#fbbf24"></span> Last Call · Boarding</div>
+        <div class="yard-legend-row"><span class="yz-dot" style="background:#a78bfa"></span> Holding</div>
+        <div class="yard-legend-row"><span class="yz-dot" style="background:#f97316"></span> Delayed / Issue</div>
+        <div class="yard-legend-row"><span class="yz-dot" style="background:#94a3b8;opacity:0.5"></span> Departed</div>
+        <div class="yard-legend-hint">Tap a bus for status &amp; actions</div>
+      </div>
+      <div class="yard-info-panel" id="yardInfoPanel"></div>
+      <div class="yard-loading" id="yardLoading">Loading 3D scene…</div>
+    </div>
   </section>
 
   <!-- LOGS -->
@@ -855,6 +955,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 /* =========================================================================
  * DismissFlow — Live School Dismissal Dashboard
@@ -1053,6 +1154,9 @@ function render() {
   renderParent();
   renderLogs();
   renderSettings();
+
+  // Yard view holds its own animation loop; just push target positions when state changes
+  if (typeof Yard !== 'undefined' && Yard.initialized) Yard.syncFromState();
 }
 
 function renderAdmin() {
@@ -1502,6 +1606,14 @@ function setView(name) {
   document.body.classList.toggle('display-mode', name === 'display');
   document.body.classList.toggle('staff-mode',   name === 'staff');
   document.body.classList.toggle('parent-mode',  name === 'parent');
+  document.body.classList.toggle('yard-mode',    name === 'yard');
+
+  // Start/stop the 3D scene only when its view is active (saves battery & CPU)
+  if (name === 'yard') {
+    Yard.start();
+  } else {
+    Yard.stop();
+  }
 }
 
 /* ---------------- Add new item ---------------- */
@@ -1838,6 +1950,643 @@ function deleteItem(id) {
   return { error: 'not found' };
 }
 `;
+
+/* =========================================================================
+ * Yard View — 3D animated school dismissal scene (Three.js)
+ * ========================================================================= */
+
+const Yard = {
+  scene: null, camera: null, renderer: null, canvas: null,
+  busMeshes: {}, schoolGroup: null, flag: null, students: [],
+  raycaster: null, mouse: null,
+  animFrame: null, initialized: false, active: false,
+  cameraAngle: 0,
+
+  // Physical zones in world coordinates (Z = north/south, X = east/west)
+  ZONES: {
+    waiting:   { x: 0,   z: -40, cols: 7, rowGap: 5,  colGap: 6  },
+    arrived:   { x: 0,   z: -14, cols: 7, rowGap: 5,  colGap: 6  },
+    last_call: { x: 0,   z: -14, cols: 7, rowGap: 5,  colGap: 6  },
+    departed:  { x: 45,  z: 35,  cols: 1, rowGap: 6,  colGap: 6  },
+    delayed:   { x: -30, z: -25, cols: 1, rowGap: 5,  colGap: 5  },
+    issue:     { x: -30, z: -25, cols: 1, rowGap: 5,  colGap: 5  },
+    hold:      { x: 30,  z: -25, cols: 1, rowGap: 5,  colGap: 5  },
+  },
+
+  init() {
+    if (this.initialized) return;
+    if (!window.THREE) { console.warn('Three.js not loaded yet'); return; }
+
+    this.canvas = document.getElementById('yardCanvas');
+    const wrap = this.canvas.parentElement;
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.Fog(0xf5b97a, 100, 220);
+
+    // Sky gradient via plane behind the scene
+    const skyTopColor = new THREE.Color(0xffd9a8);
+    const skyBotColor = new THREE.Color(0xd97e54);
+    this.scene.background = skyBotColor;
+
+    // Orthographic camera (isometric)
+    const aspect = w / h;
+    const size = 42;
+    this.camera = new THREE.OrthographicCamera(-size*aspect, size*aspect, size, -size, 0.1, 500);
+    this.camera.position.set(70, 65, 70);
+    this.camera.lookAt(0, 2, 0);
+
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(w, h);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // Lighting — afternoon golden hour
+    this.scene.add(new THREE.HemisphereLight(0xffd9a8, 0x3d3a30, 0.55));
+    const sun = new THREE.DirectionalLight(0xffd089, 1.1);
+    sun.position.set(40, 70, 25);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.left = -90;
+    sun.shadow.camera.right = 90;
+    sun.shadow.camera.top = 90;
+    sun.shadow.camera.bottom = -90;
+    sun.shadow.bias = -0.0005;
+    this.scene.add(sun);
+
+    this.buildGround();
+    this.buildSchool();
+    this.buildZoneMarkers();
+    this.buildGroupSpots();
+
+    this.raycaster = new THREE.Raycaster();
+    this.mouse = new THREE.Vector2();
+    this.canvas.addEventListener('click', e => this.onClick(e));
+    this.canvas.addEventListener('mousemove', e => this.onHover(e));
+
+    window.addEventListener('resize', () => this.onResize());
+
+    this.initialized = true;
+    document.getElementById('yardLoading').classList.add('hidden');
+    this.syncFromState();
+  },
+
+  buildGround() {
+    // Grass
+    const grass = new THREE.Mesh(
+      new THREE.PlaneGeometry(220, 220),
+      new THREE.MeshStandardMaterial({ color: 0x4a6b3a, roughness: 0.95 })
+    );
+    grass.rotation.x = -Math.PI / 2;
+    grass.receiveShadow = true;
+    this.scene.add(grass);
+
+    // Parking lot asphalt — wraps around school
+    const asphalt = new THREE.Mesh(
+      new THREE.PlaneGeometry(95, 105),
+      new THREE.MeshStandardMaterial({ color: 0x44444a, roughness: 0.85 })
+    );
+    asphalt.rotation.x = -Math.PI / 2;
+    asphalt.position.y = 0.01;
+    asphalt.receiveShadow = true;
+    this.scene.add(asphalt);
+
+    // Exit driveway leading southeast
+    const drive = new THREE.Mesh(
+      new THREE.PlaneGeometry(10, 60),
+      new THREE.MeshStandardMaterial({ color: 0x4a4a52 })
+    );
+    drive.rotation.x = -Math.PI / 2;
+    drive.position.set(35, 0.012, 30);
+    drive.rotation.z = -0.5;
+    this.scene.add(drive);
+  },
+
+  buildSchool() {
+    const group = new THREE.Group();
+
+    // Main building (long brick rectangle)
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(38, 11, 13),
+      new THREE.MeshStandardMaterial({ color: 0xb87a52, roughness: 0.8 })
+    );
+    body.position.y = 5.5;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    // Roof — flat dark trim along the top
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry(39, 0.6, 14),
+      new THREE.MeshStandardMaterial({ color: 0x5d3a24, roughness: 0.9 })
+    );
+    roof.position.y = 11.3;
+    roof.castShadow = true;
+    group.add(roof);
+
+    // Front windows (rows of glowing squares)
+    const winMat = new THREE.MeshStandardMaterial({ color: 0xffd966, emissive: 0xffb84a, emissiveIntensity: 0.5 });
+    for (let row = 0; row < 2; row++) {
+      for (let i = 0; i < 7; i++) {
+        const win = new THREE.Mesh(new THREE.BoxGeometry(2, 1.8, 0.3), winMat);
+        win.position.set(-16 + i*5.3, 3.5 + row*4, 6.6);
+        group.add(win);
+      }
+    }
+    // Back windows (just a strip — back of school not shown much)
+    for (let i = 0; i < 7; i++) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(2, 1.8, 0.3), winMat);
+      win.position.set(-16 + i*5.3, 7.5, -6.6);
+      group.add(win);
+    }
+
+    // Front door
+    const door = new THREE.Mesh(
+      new THREE.BoxGeometry(3.5, 4.5, 0.4),
+      new THREE.MeshStandardMaterial({ color: 0x3a2818 })
+    );
+    door.position.set(0, 2.25, 6.7);
+    group.add(door);
+
+    // Sign above door
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(7, 1, 0.4),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.3 })
+    );
+    sign.position.set(0, 5.5, 6.7);
+    group.add(sign);
+
+    // Flagpole + flag
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.18, 14, 8),
+      new THREE.MeshStandardMaterial({ color: 0xc8c8d0, metalness: 0.6, roughness: 0.3 })
+    );
+    pole.position.set(-22, 7, 8);
+    pole.castShadow = true;
+    group.add(pole);
+
+    const flag = new THREE.Mesh(
+      new THREE.PlaneGeometry(4, 2),
+      new THREE.MeshStandardMaterial({ color: 0xcc2244, side: THREE.DoubleSide, roughness: 0.7 })
+    );
+    flag.position.set(-20, 12, 8);
+    flag.castShadow = true;
+    group.add(flag);
+    this.flag = flag;
+
+    // Trees on either side of school
+    for (const [tx, tz] of [[-30, 0], [30, 0], [-30, -8], [30, -8], [-45, 8], [45, 8]]) {
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.4, 0.5, 3, 8),
+        new THREE.MeshStandardMaterial({ color: 0x5c3a22 })
+      );
+      trunk.position.set(tx, 1.5, tz);
+      trunk.castShadow = true;
+      group.add(trunk);
+      const foliage = new THREE.Mesh(
+        new THREE.SphereGeometry(2.2, 12, 10),
+        new THREE.MeshStandardMaterial({ color: 0x4a7a3a, roughness: 0.9 })
+      );
+      foliage.position.set(tx, 4.5, tz);
+      foliage.castShadow = true;
+      group.add(foliage);
+    }
+
+    this.scene.add(group);
+    this.schoolGroup = group;
+  },
+
+  buildZoneMarkers() {
+    // White curb stripe at Arrived/Last Call zone
+    const curb = new THREE.Mesh(
+      new THREE.PlaneGeometry(42, 0.4),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    curb.rotation.x = -Math.PI / 2;
+    curb.position.set(0, 0.025, -10.5);
+    this.scene.add(curb);
+
+    // Numbered bus bays (yellow stripes at depot)
+    for (let i = 0; i < 8; i++) {
+      const stripe = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.3, 7),
+        new THREE.MeshBasicMaterial({ color: 0xfdd663 })
+      );
+      stripe.rotation.x = -Math.PI / 2;
+      stripe.position.set(-21 + i*6, 0.025, -40);
+      this.scene.add(stripe);
+    }
+
+    // "EXIT" arrow on driveway
+    const exitArrow = new THREE.Mesh(
+      new THREE.PlaneGeometry(3, 5),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    exitArrow.rotation.x = -Math.PI / 2;
+    exitArrow.rotation.z = -0.5;
+    exitArrow.position.set(30, 0.025, 22);
+    this.scene.add(exitArrow);
+  },
+
+  buildGroupSpots() {
+    // Walkers path west of school
+    const path = new THREE.Mesh(
+      new THREE.PlaneGeometry(6, 30),
+      new THREE.MeshStandardMaterial({ color: 0xa89070, roughness: 0.95 })
+    );
+    path.rotation.x = -Math.PI / 2;
+    path.position.set(-55, 0.013, 5);
+    this.scene.add(path);
+
+    // Car rider loop east — curved approximated as a flat patch
+    const carLot = new THREE.Mesh(
+      new THREE.PlaneGeometry(15, 25),
+      new THREE.MeshStandardMaterial({ color: 0x40404a })
+    );
+    carLot.rotation.x = -Math.PI / 2;
+    carLot.position.set(52, 0.013, 8);
+    this.scene.add(carLot);
+
+    // Aftercare wing (small extra building)
+    const after = new THREE.Mesh(
+      new THREE.BoxGeometry(8, 6, 7),
+      new THREE.MeshStandardMaterial({ color: 0xd8a878, roughness: 0.8 })
+    );
+    after.position.set(28, 3, 12);
+    after.castShadow = true;
+    after.receiveShadow = true;
+    this.scene.add(after);
+    const afterSign = new THREE.Mesh(
+      new THREE.PlaneGeometry(5, 0.8),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+    );
+    afterSign.position.set(28, 5, 15.55);
+    this.scene.add(afterSign);
+
+    // Patrol post (corner shed)
+    const post = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 3, 3),
+      new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.7 })
+    );
+    post.position.set(-28, 1.5, 13);
+    post.castShadow = true;
+    this.scene.add(post);
+  },
+
+  createBusMesh(item) {
+    const group = new THREE.Group();
+    const c = colorHex(item.color);
+
+    // Body
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(5.5, 2.6, 2.2),
+      new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, metalness: 0.05 })
+    );
+    body.position.y = 1.5;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    // Cab/roof slightly lighter
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry(5.2, 0.5, 2),
+      new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.4 })
+    );
+    roof.position.y = 3.0;
+    roof.castShadow = true;
+    group.add(roof);
+
+    // Hood (short)
+    const hood = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 1.8, 2.0),
+      new THREE.MeshStandardMaterial({ color: c, roughness: 0.55 })
+    );
+    hood.position.set(3.2, 1.1, 0);
+    hood.castShadow = true;
+    group.add(hood);
+
+    // Windshield
+    const ws = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.9, 1.2),
+      new THREE.MeshStandardMaterial({ color: 0x223344, transparent: true, opacity: 0.85 })
+    );
+    ws.position.set(3.95, 1.7, 0);
+    ws.rotation.y = Math.PI / 2;
+    group.add(ws);
+
+    // Side windows (dark strip on both sides)
+    for (const side of [1, -1]) {
+      for (let i = 0; i < 4; i++) {
+        const w = new THREE.Mesh(
+          new THREE.PlaneGeometry(0.9, 0.9),
+          new THREE.MeshStandardMaterial({ color: 0x223344 })
+        );
+        w.position.set(-1.8 + i*1.1, 2.2, 1.111 * side);
+        w.rotation.y = side === 1 ? 0 : Math.PI;
+        group.add(w);
+      }
+    }
+
+    // Wheels
+    const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.45, 14);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.95 });
+    [[-1.8, 1.2], [1.8, 1.2], [-1.8, -1.2], [1.8, -1.2]].forEach(([x, z]) => {
+      const w = new THREE.Mesh(wheelGeo, wheelMat);
+      w.rotation.x = Math.PI / 2;
+      w.position.set(x, 0.5, z);
+      w.castShadow = true;
+      group.add(w);
+    });
+
+    // Headlights
+    for (const z of [-0.6, 0.6]) {
+      const h = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xfff8d0 })
+      );
+      h.position.set(4.0, 1.4, z);
+      group.add(h);
+    }
+
+    // Glow ring under bus (Last Call yellow, Your Bus blue)
+    const glow = new THREE.Mesh(
+      new THREE.RingGeometry(2.8, 4.5, 32),
+      new THREE.MeshBasicMaterial({ color: 0xfbbf24, side: THREE.DoubleSide, transparent: true, opacity: 0 })
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 0.05;
+    group.add(glow);
+
+    // Beam of light (Your Bus pin)
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.9, 1.8, 28, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xfcd34d, transparent: true, opacity: 0, side: THREE.DoubleSide })
+    );
+    beam.position.y = 14;
+    group.add(beam);
+
+    // Exhaust puff (small sphere shown only on Last Call)
+    const puff = new THREE.Mesh(
+      new THREE.SphereGeometry(0.4, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xbfbfbf, transparent: true, opacity: 0 })
+    );
+    puff.position.set(-3.2, 1.6, 0);
+    group.add(puff);
+
+    group.userData = { itemId: item.id, item, glow, beam, puff, body, lookDir: 0 };
+    return group;
+  },
+
+  getZonePosition(status, index, total) {
+    const zone = this.ZONES[status] || this.ZONES.waiting;
+    const cols = Math.min(zone.cols, Math.max(total, 1));
+    const rows = Math.ceil(total / cols);
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    const x = zone.x + (col - (cols - 1) / 2) * zone.colGap;
+    const z = zone.z + (row - (rows - 1) / 2) * zone.rowGap;
+    return { x, z };
+  },
+
+  syncFromState() {
+    if (!this.initialized) return;
+    const buses = state.items.filter(i => i.type === 'bus');
+
+    // Group buses by status, preserve sort order
+    const byStatus = {};
+    buses.forEach(b => { (byStatus[b.status] = byStatus[b.status] || []).push(b); });
+    Object.values(byStatus).forEach(arr => arr.sort((a, b) => a.sort_order - b.sort_order));
+
+    // Update each bus's target position
+    buses.forEach(item => {
+      let mesh = this.busMeshes[item.id];
+      if (!mesh) {
+        mesh = this.createBusMesh(item);
+        this.scene.add(mesh);
+        this.busMeshes[item.id] = mesh;
+        const peers = byStatus[item.status] || [item];
+        const idx = peers.findIndex(b => b.id === item.id);
+        const p = this.getZonePosition(item.status, idx, peers.length);
+        mesh.position.set(p.x, 0, p.z);
+        mesh.userData.targetX = p.x;
+        mesh.userData.targetZ = p.z;
+      } else {
+        const peers = byStatus[item.status] || [item];
+        const idx = peers.findIndex(b => b.id === item.id);
+        const p = this.getZonePosition(item.status, idx, peers.length);
+        mesh.userData.targetX = p.x;
+        mesh.userData.targetZ = p.z;
+      }
+      mesh.userData.item = item;
+      // Face direction based on status
+      if (item.status === 'arrived' || item.status === 'last_call') {
+        mesh.userData.targetRotY = 0; // facing east (curb)
+      } else if (item.status === 'waiting') {
+        mesh.userData.targetRotY = Math.PI; // facing south (toward school)
+      } else if (item.status === 'departed') {
+        mesh.userData.targetRotY = -0.5; // angled toward exit
+      } else {
+        mesh.userData.targetRotY = 0;
+      }
+    });
+
+    // Remove orphan buses
+    Object.keys(this.busMeshes).forEach(id => {
+      if (!buses.find(b => b.id === id)) {
+        this.scene.remove(this.busMeshes[id]);
+        delete this.busMeshes[id];
+      }
+    });
+  },
+
+  animate() {
+    if (!this.active) return;
+    this.animFrame = requestAnimationFrame(() => this.animate());
+
+    const t = performance.now() / 1000;
+    const favId = getFavoriteBusId();
+
+    // Bus updates
+    Object.values(this.busMeshes).forEach(mesh => {
+      const { item, glow, beam, puff } = mesh.userData;
+      const tx = mesh.userData.targetX, tz = mesh.userData.targetZ;
+      const trot = mesh.userData.targetRotY || 0;
+
+      // Smooth lerp position
+      mesh.position.x += (tx - mesh.position.x) * 0.06;
+      mesh.position.z += (tz - mesh.position.z) * 0.06;
+      mesh.rotation.y += (trot - mesh.rotation.y) * 0.08;
+
+      // Last Call: bobble + glowing yellow ring + exhaust puff
+      if (item.status === 'last_call') {
+        mesh.position.y = Math.abs(Math.sin(t * 6)) * 0.08;
+        glow.material.color.set(0xfbbf24);
+        glow.material.opacity = 0.5 + Math.sin(t * 4) * 0.2;
+        puff.material.opacity = 0.4 + Math.sin(t * 8) * 0.3;
+        puff.position.y = 1.6 + (Math.sin(t * 8) + 1) * 0.6;
+        puff.scale.setScalar(1 + Math.sin(t * 8) * 0.3);
+      } else if (item.status === 'arrived') {
+        // Soft green glow
+        glow.material.color.set(0x34d399);
+        glow.material.opacity = 0.25;
+        puff.material.opacity = 0;
+        mesh.position.y *= 0.85;
+      } else if (item.status === 'issue' || item.status === 'delayed') {
+        glow.material.color.set(0xef4444);
+        glow.material.opacity = 0.3 + Math.sin(t * 3) * 0.15;
+        puff.material.opacity = 0;
+      } else {
+        glow.material.opacity = Math.max(0, glow.material.opacity - 0.02);
+        puff.material.opacity = Math.max(0, puff.material.opacity - 0.03);
+        mesh.position.y *= 0.85;
+      }
+
+      // Your Bus beam — overrides other glows visually
+      if (item.id === favId && item.status !== 'departed') {
+        beam.material.opacity = 0.18 + Math.sin(t * 2) * 0.06;
+        glow.material.color.set(0x4cc3ff);
+        glow.material.opacity = Math.max(glow.material.opacity, 0.5);
+      } else {
+        beam.material.opacity = Math.max(0, beam.material.opacity - 0.02);
+      }
+
+      // Departed: drift further off-screen over time
+      if (item.status === 'departed') {
+        mesh.userData.targetX += 0.05;
+        mesh.userData.targetZ += 0.04;
+      }
+    });
+
+    // Gentle flag wave
+    if (this.flag) {
+      this.flag.rotation.z = Math.sin(t * 1.6) * 0.08;
+      this.flag.scale.x = 1 + Math.sin(t * 2.2) * 0.04;
+    }
+
+    // Slow camera orbit (very subtle)
+    this.cameraAngle += 0.0008;
+    const r = 95;
+    this.camera.position.x = Math.cos(this.cameraAngle) * r;
+    this.camera.position.z = Math.sin(this.cameraAngle) * r;
+    this.camera.position.y = 65;
+    this.camera.lookAt(0, 4, 0);
+
+    this.renderer.render(this.scene, this.camera);
+  },
+
+  start() {
+    if (!window.THREE) {
+      // Three.js might not have loaded yet — retry shortly
+      setTimeout(() => this.start(), 200);
+      return;
+    }
+    this.active = true;
+    if (!this.initialized) this.init();
+    this.syncFromState();
+    this.onResize();
+    this.animate();
+  },
+
+  stop() {
+    this.active = false;
+    if (this.animFrame) cancelAnimationFrame(this.animFrame);
+  },
+
+  onResize() {
+    if (!this.initialized) return;
+    const wrap = this.canvas.parentElement;
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    const aspect = w / h;
+    const size = 42;
+    this.camera.left = -size * aspect;
+    this.camera.right = size * aspect;
+    this.camera.top = size;
+    this.camera.bottom = -size;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h);
+  },
+
+  onClick(event) {
+    if (!this.initialized) return;
+    const rect = this.canvas.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const meshes = Object.values(this.busMeshes);
+    const intersects = this.raycaster.intersectObjects(meshes, true);
+    if (intersects.length > 0) {
+      let obj = intersects[0].object;
+      while (obj && !(obj.userData && obj.userData.itemId)) obj = obj.parent;
+      if (obj) {
+        const item = state.items.find(i => i.id === obj.userData.itemId);
+        if (item) this.showInfo(item);
+      }
+    } else {
+      document.getElementById('yardInfoPanel').classList.remove('show');
+    }
+  },
+
+  onHover(event) {
+    if (!this.initialized) return;
+    const rect = this.canvas.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const intersects = this.raycaster.intersectObjects(Object.values(this.busMeshes), true);
+    this.canvas.style.cursor = intersects.length > 0 ? 'pointer' : 'default';
+  },
+
+  showInfo(item) {
+    const panel = document.getElementById('yardInfoPanel');
+    panel.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+        <div style="width:24px;height:24px;border-radius:50%;background:${colorHex(item.color)};border:2px solid rgba(255,255,255,0.2);flex-shrink:0;"></div>
+        <div style="font-size:22px;font-weight:700;line-height:1;">${item.name}${item.route ? ' #' + item.route : ''}</div>
+      </div>
+      <div style="color:var(--text-dim);font-size:13px;margin-bottom:14px;">
+        Status: <strong style="color:#fff;">${statusLabel(item.status)}</strong>
+        ${item.last_updated_at ? ' · ' + timeAgo(item.last_updated_at) : ''}
+      </div>
+      <div id="yardActions" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;">
+        <button id="yardFavBtn" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:#fbbf24;padding:6px 12px;border-radius:6px;cursor:pointer;flex:1;">${getFavoriteBusId() === item.id ? '★ Unpin from Parent View' : '☆ Pin as Your Bus'}</button>
+        <button id="yardClose" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 12px;border-radius:6px;cursor:pointer;">Close</button>
+      </div>
+    `;
+    panel.classList.add('show');
+
+    const actions = document.getElementById('yardActions');
+    const buttons = buttonsForStatus(item.status);
+    buttons.forEach(b => {
+      const btn = document.createElement('button');
+      btn.textContent = b.label;
+      btn.style.cssText = 'padding:8px 12px;border-radius:7px;cursor:pointer;background:var(--panel-2);color:var(--text);border:1px solid var(--border);font-size:12px;font-weight:600;';
+      if (b.cls === 'primary') {
+        btn.style.background = 'linear-gradient(180deg,#2563eb,#1d4ed8)';
+        btn.style.borderColor = '#2563eb';
+      } else if (b.cls === 'danger') {
+        btn.style.color = '#fca5a5';
+        btn.style.borderColor = 'rgba(239,68,68,0.4)';
+      } else if (b.cls === 'warn') {
+        btn.style.color = '#fcd34d';
+        btn.style.borderColor = 'rgba(251,191,36,0.4)';
+      }
+      btn.onclick = () => {
+        setStatus(item.id, b.next);
+        // Update panel in-place to reflect new status
+        setTimeout(() => this.showInfo(state.items.find(i => i.id === item.id)), 30);
+      };
+      actions.appendChild(btn);
+    });
+
+    document.getElementById('yardFavBtn').onclick = () => {
+      toggleFavoriteBus(item);
+      this.showInfo(state.items.find(i => i.id === item.id));
+    };
+    document.getElementById('yardClose').onclick = () => panel.classList.remove('show');
+  },
+};
 
 /* ---------------- Wire up ---------------- */
 document.querySelectorAll('.nav button').forEach(b => {
