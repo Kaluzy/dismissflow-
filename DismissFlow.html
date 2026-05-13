@@ -894,6 +894,53 @@
     letter-spacing: 0.5px;
     pointer-events: none;
   }
+  .yard-ticker {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    background: rgba(10,15,25,0.78);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 10px 12px;
+    color: #cbd5e1;
+    font-size: 12px;
+    max-width: 320px;
+    pointer-events: none;
+  }
+  .yard-ticker-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent);
+    font-weight: 800;
+    margin-bottom: 6px;
+  }
+  .yard-ticker-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.3;
+  }
+  .yard-ticker-row .t { color: var(--muted); font-size: 11px; min-width: 50px; }
+  .yard-ticker-row .item { color: #fff; font-weight: 600; }
+  .yard-ticker-row .arrow { color: var(--muted); }
+  .yard-ticker-row .ns { font-weight: 700; }
+  .yard-ticker-row .ns.s-arrived { color: #34d399; }
+  .yard-ticker-row .ns.s-last_call { color: #fbbf24; }
+  .yard-ticker-row .ns.s-departed { color: #94a3b8; }
+  .yard-ticker-row .ns.s-delayed { color: #f97316; }
+  .yard-ticker-row .ns.s-issue { color: #ef4444; }
+  .yard-ticker-row .ns.s-hold { color: #a78bfa; }
+  .yard-ticker-row .ns.s-waiting { color: #cbd5e1; }
+  .yard-ticker-row.fresh { animation: ticker-flash 1.2s; }
+  @keyframes ticker-flash {
+    0%   { background: rgba(76,195,255,0.2); }
+    100% { background: transparent; }
+  }
+  .yard-ticker-empty { color: var(--muted); font-style: italic; padding: 4px 0; font-size: 11px; }
   @media (max-width: 600px) {
     .yard-legend, .yard-hud { font-size: 11px; padding: 10px; }
     .yard-legend { max-width: 180px; }
@@ -988,6 +1035,7 @@
         <div class="yard-legend-hint">Tap a bus for status &amp; actions</div>
       </div>
       <div class="yard-hud" id="yardHud"></div>
+      <div class="yard-ticker" id="yardTicker"></div>
       <div class="yard-info-panel" id="yardInfoPanel"></div>
       <div class="yard-hint">Drag to rotate · Pinch / scroll to zoom · Tap a bus for actions</div>
       <div class="yard-controls">
@@ -2093,6 +2141,12 @@ const Yard = {
     side:    { theta: Math.PI / 2,       phi: Math.PI / 2.4, zoom: 1.1 },
   },
   currentPreset: 'default',
+  // Camera tween state
+  tween: null,
+  // Sticky departure queue — each departed bus gets a unique slot index
+  departureCounter: 0,
+  // Clouds
+  clouds: [],
 
   // Physical zones in world coordinates (Z = north/south, X = east/west)
   ZONES: {
@@ -2151,6 +2205,8 @@ const Yard = {
     this.buildSchool();
     this.buildZoneMarkers();
     this.buildGroupSpots();
+    this.buildSkyDetails();
+    this.buildCompass();
 
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
@@ -2262,11 +2318,31 @@ const Yard = {
   setPreset(name) {
     const p = this.presets[name];
     if (!p) return;
-    this.cam.theta = p.theta;
-    this.cam.phi   = p.phi;
-    this.cam.zoom  = p.zoom;
-    this.updateCameraFromOrbit();
+    // Smooth tween over 0.7s with ease-out cubic
+    this.tween = {
+      fromTheta: this.cam.theta, fromPhi: this.cam.phi, fromZoom: this.cam.zoom,
+      toTheta: p.theta, toPhi: p.phi, toZoom: p.zoom,
+      start: performance.now(), duration: 700,
+    };
     this.setPresetActive(name);
+  },
+
+  stepTween() {
+    if (!this.tween) return;
+    const t = (performance.now() - this.tween.start) / this.tween.duration;
+    if (t >= 1) {
+      this.cam.theta = this.tween.toTheta;
+      this.cam.phi   = this.tween.toPhi;
+      this.cam.zoom  = this.tween.toZoom;
+      this.updateCameraFromOrbit();
+      this.tween = null;
+      return;
+    }
+    const e = 1 - Math.pow(1 - t, 3); // ease-out cubic
+    this.cam.theta = this.tween.fromTheta + (this.tween.toTheta - this.tween.fromTheta) * e;
+    this.cam.phi   = this.tween.fromPhi   + (this.tween.toPhi   - this.tween.fromPhi)   * e;
+    this.cam.zoom  = this.tween.fromZoom  + (this.tween.toZoom  - this.tween.fromZoom)  * e;
+    this.updateCameraFromOrbit();
   },
   setPresetActive(name) {
     this.currentPreset = name;
@@ -2314,93 +2390,214 @@ const Yard = {
   buildSchool() {
     const group = new THREE.Group();
 
-    // Main building (long brick rectangle)
+    // Procedural brick texture for the walls
+    const brickTex = this.makeBrickTexture();
+
+    // Two-story main building body
+    const wallMat = new THREE.MeshStandardMaterial({ map: brickTex, roughness: 0.85 });
     const body = new THREE.Mesh(
-      new THREE.BoxGeometry(38, 11, 13),
-      new THREE.MeshStandardMaterial({ color: 0xb87a52, roughness: 0.8 })
+      new THREE.BoxGeometry(48, 13, 14),
+      wallMat
     );
-    body.position.y = 5.5;
+    body.position.y = 6.5;
     body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);
 
-    // Roof — flat dark trim along the top
-    const roof = new THREE.Mesh(
-      new THREE.BoxGeometry(39, 0.6, 14),
-      new THREE.MeshStandardMaterial({ color: 0x5d3a24, roughness: 0.9 })
+    // White trim band between floors
+    const band = new THREE.Mesh(
+      new THREE.BoxGeometry(48.5, 0.4, 14.5),
+      new THREE.MeshStandardMaterial({ color: 0xf5f0e8 })
     );
-    roof.position.y = 11.3;
+    band.position.y = 7;
+    group.add(band);
+
+    // Roof — dark slate trim around perimeter
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry(49, 0.6, 15),
+      new THREE.MeshStandardMaterial({ color: 0x3a3530, roughness: 0.95 })
+    );
+    roof.position.y = 13.3;
     roof.castShadow = true;
     group.add(roof);
+    // Roof crown
+    const crown = new THREE.Mesh(
+      new THREE.BoxGeometry(49.5, 0.2, 15.5),
+      new THREE.MeshStandardMaterial({ color: 0x2a2520 })
+    );
+    crown.position.y = 13.7;
+    group.add(crown);
 
-    // Front windows (rows of glowing squares)
-    const winMat = new THREE.MeshStandardMaterial({ color: 0xffd966, emissive: 0xffb84a, emissiveIntensity: 0.5 });
-    for (let row = 0; row < 2; row++) {
-      for (let i = 0; i < 7; i++) {
-        const win = new THREE.Mesh(new THREE.BoxGeometry(2, 1.8, 0.3), winMat);
-        win.position.set(-16 + i*5.3, 3.5 + row*4, 6.6);
+    // Front windows — divided panes on two floors
+    const winMat = new THREE.MeshStandardMaterial({ color: 0xfff4c4, emissive: 0xffd166, emissiveIntensity: 0.45 });
+    const winFrame = new THREE.MeshStandardMaterial({ color: 0xf5f0e8 });
+    // Two floors, skip middle for entrance area
+    for (let floor = 0; floor < 2; floor++) {
+      const yBase = floor === 0 ? 3.5 : 9.5;
+      for (let i = 0; i < 10; i++) {
+        const x = -22 + i * 4.9;
+        if (Math.abs(x) < 4 && floor === 0) continue; // gap for entrance
+        // Frame
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.6, 0.2), winFrame);
+        frame.position.set(x, yBase, 7.05);
+        group.add(frame);
+        // Glass (slightly inset, glowy)
+        const win = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 0.25), winMat);
+        win.position.set(x, yBase, 7.1);
         group.add(win);
+        // Mullion (cross frame)
+        const vmull = new THREE.Mesh(new THREE.BoxGeometry(0.15, 2.4, 0.3), winFrame);
+        vmull.position.set(x, yBase, 7.18);
+        group.add(vmull);
+        const hmull = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.15, 0.3), winFrame);
+        hmull.position.set(x, yBase, 7.18);
+        group.add(hmull);
       }
     }
-    // Back windows (just a strip — back of school not shown much)
-    for (let i = 0; i < 7; i++) {
-      const win = new THREE.Mesh(new THREE.BoxGeometry(2, 1.8, 0.3), winMat);
-      win.position.set(-16 + i*5.3, 7.5, -6.6);
+    // Back windows (single floor strip — service side, dimmer)
+    const backWinMat = new THREE.MeshStandardMaterial({ color: 0xd4d4d4, roughness: 0.7 });
+    for (let i = 0; i < 8; i++) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.6, 0.2), backWinMat);
+      win.position.set(-19 + i*5.4, 8.5, -7.05);
       group.add(win);
     }
 
-    // Front door
-    const door = new THREE.Mesh(
-      new THREE.BoxGeometry(3.5, 4.5, 0.4),
+    // ---- Front entrance: portico (covered columned porch) ----
+    // Concrete steps
+    for (let step = 0; step < 3; step++) {
+      const s = new THREE.Mesh(
+        new THREE.BoxGeometry(9 - step*0.6, 0.35, 1.2 - step*0.2),
+        new THREE.MeshStandardMaterial({ color: 0xcfc7b8, roughness: 0.9 })
+      );
+      s.position.set(0, 0.2 + step*0.35, 7.6 + step*0.5);
+      s.receiveShadow = true;
+      s.castShadow = true;
+      group.add(s);
+    }
+    // Stoop platform
+    const stoop = new THREE.Mesh(
+      new THREE.BoxGeometry(8, 0.3, 2.5),
+      new THREE.MeshStandardMaterial({ color: 0xcfc7b8 })
+    );
+    stoop.position.set(0, 1.25, 8);
+    group.add(stoop);
+
+    // Four columns
+    const colMat = new THREE.MeshStandardMaterial({ color: 0xf5f0e8, roughness: 0.8 });
+    for (let i = -1; i <= 1; i += 2/3) {
+      if (Math.abs(i) < 0.5) continue;
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 6, 12), colMat);
+      col.position.set(i * 3.3, 4.2, 8.5);
+      col.castShadow = true;
+      group.add(col);
+      // Capital (top)
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 0.9), colMat);
+      cap.position.set(i * 3.3, 7.4, 8.5);
+      group.add(cap);
+      // Base
+      const baseB = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 0.9), colMat);
+      baseB.position.set(i * 3.3, 1.4, 8.5);
+      group.add(baseB);
+    }
+
+    // Portico roof — pediment (triangular) + flat roof behind
+    const porticoRoof = new THREE.Mesh(
+      new THREE.BoxGeometry(8.5, 0.4, 2.5),
+      new THREE.MeshStandardMaterial({ color: 0xf5f0e8 })
+    );
+    porticoRoof.position.set(0, 7.8, 8.5);
+    porticoRoof.castShadow = true;
+    group.add(porticoRoof);
+
+    // Triangular pediment above portico (using shape geometry)
+    const pediShape = new THREE.Shape();
+    pediShape.moveTo(-4.5, 0);
+    pediShape.lineTo(4.5, 0);
+    pediShape.lineTo(0, 2.2);
+    pediShape.closePath();
+    const pediGeo = new THREE.ExtrudeGeometry(pediShape, { depth: 0.4, bevelEnabled: false });
+    const pediment = new THREE.Mesh(pediGeo, new THREE.MeshStandardMaterial({ color: 0xf5f0e8 }));
+    pediment.position.set(0, 8, 8.5);
+    pediment.rotation.x = -Math.PI / 2;
+    pediment.rotation.z = Math.PI;
+    // Actually orient it standing up facing camera
+    pediment.rotation.set(0, 0, 0);
+    pediment.position.set(0, 8, 9.7);
+    pediment.castShadow = true;
+    group.add(pediment);
+
+    // School name plaque on the building between portico and 2nd floor windows
+    const plaqueCanvas = document.createElement('canvas');
+    plaqueCanvas.width = 1024; plaqueCanvas.height = 192;
+    const pctx = plaqueCanvas.getContext('2d');
+    pctx.fillStyle = '#f5f0e8';
+    pctx.fillRect(0, 0, 1024, 192);
+    pctx.strokeStyle = '#5d3a24';
+    pctx.lineWidth = 10;
+    pctx.strokeRect(10, 10, 1004, 172);
+    pctx.fillStyle = '#2a1a08';
+    pctx.font = 'bold 88px "Georgia", "Times New Roman", serif';
+    pctx.textAlign = 'center';
+    pctx.textBaseline = 'middle';
+    pctx.fillText('FARMLAND ELEMENTARY', 512, 96);
+    const plaqueTex = new THREE.CanvasTexture(plaqueCanvas);
+    const plaque = new THREE.Mesh(
+      new THREE.PlaneGeometry(14, 2.4),
+      new THREE.MeshStandardMaterial({ map: plaqueTex, emissive: 0xffffff, emissiveIntensity: 0.12, emissiveMap: plaqueTex })
+    );
+    plaque.position.set(0, 11.5, 7.1);
+    group.add(plaque);
+
+    // Front double doors with glass
+    const doorFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(4.5, 5.5, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0x2a1a08 })
+    );
+    doorFrame.position.set(0, 4.15, 7.1);
+    group.add(doorFrame);
+    const doorL = new THREE.Mesh(
+      new THREE.BoxGeometry(1.9, 4.8, 0.4),
       new THREE.MeshStandardMaterial({ color: 0x3a2818 })
     );
-    door.position.set(0, 2.25, 6.7);
-    group.add(door);
-
-    // "MAIN ENTRANCE" sign above the front door — clearly identifies front
-    const signCanvas = document.createElement('canvas');
-    signCanvas.width = 1024; signCanvas.height = 192;
-    const sctx = signCanvas.getContext('2d');
-    sctx.fillStyle = '#fff8e7';
-    sctx.fillRect(0, 0, 1024, 192);
-    sctx.strokeStyle = '#5d3a24';
-    sctx.lineWidth = 8;
-    sctx.strokeRect(8, 8, 1008, 176);
-    sctx.fillStyle = '#2a1a08';
-    sctx.font = 'bold 92px -apple-system, "Segoe UI", sans-serif';
-    sctx.textAlign = 'center';
-    sctx.textBaseline = 'middle';
-    sctx.fillText('MAIN ENTRANCE', 512, 96);
-    const signTex = new THREE.CanvasTexture(signCanvas);
-    const sign = new THREE.Mesh(
-      new THREE.PlaneGeometry(10, 1.8),
-      new THREE.MeshStandardMaterial({ map: signTex, emissive: 0xffffff, emissiveIntensity: 0.15, emissiveMap: signTex })
+    doorL.position.set(-1.05, 4, 7.2);
+    group.add(doorL);
+    const doorR = new THREE.Mesh(
+      new THREE.BoxGeometry(1.9, 4.8, 0.4),
+      new THREE.MeshStandardMaterial({ color: 0x3a2818 })
     );
-    sign.position.set(0, 6, 6.55);
-    group.add(sign);
+    doorR.position.set(1.05, 4, 7.2);
+    group.add(doorR);
+    // Door windows (glass panels)
+    const doorWinMat = new THREE.MeshStandardMaterial({ color: 0x556a78, transparent: true, opacity: 0.5 });
+    const doorWinL = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 3), doorWinMat);
+    doorWinL.position.set(-1.05, 4.5, 7.4);
+    group.add(doorWinL);
+    const doorWinR = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 3), doorWinMat);
+    doorWinR.position.set(1.05, 4.5, 7.4);
+    group.add(doorWinR);
 
-    // Sidewalk from front door out to the loading curb
+    // Long sidewalk from front steps out to the loading curb
     const sidewalk = new THREE.Mesh(
-      new THREE.PlaneGeometry(4, 4),
+      new THREE.PlaneGeometry(5, 6),
       new THREE.MeshStandardMaterial({ color: 0xcfc7b8, roughness: 0.95 })
     );
     sidewalk.rotation.x = -Math.PI / 2;
-    sidewalk.position.set(0, 0.018, 8);
+    sidewalk.position.set(0, 0.022, 11);
     sidewalk.receiveShadow = true;
     this.scene.add(sidewalk);
 
-    // Back side — service door + loading dock + dumpster (clearly the back of the school)
+    // Back side — service door + loading dock + dumpster
     const backDoor = new THREE.Mesh(
       new THREE.BoxGeometry(4, 4, 0.4),
       new THREE.MeshStandardMaterial({ color: 0x8a6e54 })
     );
-    backDoor.position.set(0, 2, -6.7);
+    backDoor.position.set(-10, 2, -7.1);
     group.add(backDoor);
     const dock = new THREE.Mesh(
-      new THREE.BoxGeometry(8, 1, 3),
+      new THREE.BoxGeometry(10, 1, 3),
       new THREE.MeshStandardMaterial({ color: 0x4a4a4a })
     );
-    dock.position.set(0, 0.5, -8.5);
+    dock.position.set(-10, 0.5, -9);
     dock.castShadow = true;
     dock.receiveShadow = true;
     group.add(dock);
@@ -2408,47 +2605,60 @@ const Yard = {
       new THREE.BoxGeometry(2.5, 1.8, 1.5),
       new THREE.MeshStandardMaterial({ color: 0x3a5a3a })
     );
-    dumpster.position.set(8, 0.9, -9);
+    dumpster.position.set(-3, 0.9, -9.5);
     dumpster.castShadow = true;
     group.add(dumpster);
 
-    // Small "SERVICE" placard above back door
-    const backCanvas = document.createElement('canvas');
-    backCanvas.width = 256; backCanvas.height = 64;
-    const bctx = backCanvas.getContext('2d');
-    bctx.fillStyle = '#2a2a2a';
-    bctx.fillRect(0, 0, 256, 64);
-    bctx.fillStyle = '#e2e8f0';
-    bctx.font = 'bold 32px -apple-system, "Segoe UI", sans-serif';
-    bctx.textAlign = 'center';
-    bctx.textBaseline = 'middle';
-    bctx.fillText('SERVICE', 128, 32);
-    const backTex = new THREE.CanvasTexture(backCanvas);
-    const backSign = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.2, 0.8),
-      new THREE.MeshStandardMaterial({ map: backTex })
+    // HVAC unit on roof — signals it's the back
+    const hvac = new THREE.Mesh(
+      new THREE.BoxGeometry(4, 1.5, 3),
+      new THREE.MeshStandardMaterial({ color: 0x707577, roughness: 0.7 })
     );
-    backSign.position.set(0, 5, -6.6);
-    backSign.rotation.y = Math.PI;
-    group.add(backSign);
+    hvac.position.set(8, 14.4, -2);
+    hvac.castShadow = true;
+    group.add(hvac);
 
-    // Flagpole + flag
-    const pole = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.18, 14, 8),
-      new THREE.MeshStandardMaterial({ color: 0xc8c8d0, metalness: 0.6, roughness: 0.3 })
+    // School marquee sign in the front yard
+    const marqueeBox = new THREE.Mesh(
+      new THREE.BoxGeometry(7, 3, 0.5),
+      new THREE.MeshStandardMaterial({ color: 0x5d3a24 })
     );
-    pole.position.set(-22, 7, 8);
-    pole.castShadow = true;
-    group.add(pole);
+    marqueeBox.position.set(-22, 2.5, 22);
+    marqueeBox.castShadow = true;
+    marqueeBox.rotation.y = 0.3;
+    group.add(marqueeBox);
+    const marqueeCanvas = document.createElement('canvas');
+    marqueeCanvas.width = 512; marqueeCanvas.height = 220;
+    const mctx = marqueeCanvas.getContext('2d');
+    mctx.fillStyle = '#1a3a6e';
+    mctx.fillRect(0, 0, 512, 220);
+    mctx.fillStyle = '#ffe066';
+    mctx.font = 'bold 38px "Georgia", serif';
+    mctx.textAlign = 'center';
+    mctx.fillText('FARMLAND', 256, 70);
+    mctx.font = 'bold 30px "Georgia", serif';
+    mctx.fillText('ELEMENTARY', 256, 110);
+    mctx.fillStyle = '#ffffff';
+    mctx.font = 'bold 22px sans-serif';
+    mctx.fillText('Home of the Falcons', 256, 160);
+    const marqueeTex = new THREE.CanvasTexture(marqueeCanvas);
+    const marqueeFront = new THREE.Mesh(
+      new THREE.PlaneGeometry(6.6, 2.7),
+      new THREE.MeshStandardMaterial({ map: marqueeTex, emissive: 0xffffff, emissiveIntensity: 0.2, emissiveMap: marqueeTex })
+    );
+    marqueeFront.position.set(-22, 2.5, 22.3);
+    marqueeFront.rotation.y = 0.3;
+    group.add(marqueeFront);
+    // Post under marquee
+    const marqueePost = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.2, 0.2, 2.5, 8),
+      new THREE.MeshStandardMaterial({ color: 0x5d3a24 })
+    );
+    marqueePost.position.set(-22, 0.75, 22);
+    group.add(marqueePost);
 
-    const flag = new THREE.Mesh(
-      new THREE.PlaneGeometry(4, 2),
-      new THREE.MeshStandardMaterial({ color: 0xcc2244, side: THREE.DoubleSide, roughness: 0.7 })
-    );
-    flag.position.set(-20, 12, 8);
-    flag.castShadow = true;
-    group.add(flag);
-    this.flag = flag;
+    // Two flagpoles in front of school: US + Maryland
+    this.addFlags(group);
 
     // Trees on either side of school
     for (const [tx, tz] of [[-30, 0], [30, 0], [-30, -8], [30, -8], [-45, 8], [45, 8]]) {
@@ -2470,6 +2680,251 @@ const Yard = {
 
     this.scene.add(group);
     this.schoolGroup = group;
+  },
+
+  /* ---- Procedural brick texture (red brick with mortar) ---- */
+  makeBrickTexture() {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 256;
+    const x = c.getContext('2d');
+    // Mortar background
+    x.fillStyle = '#9e7a5a';
+    x.fillRect(0, 0, 256, 256);
+    // Bricks with offset rows
+    const bw = 32, bh = 14, gap = 2;
+    for (let row = 0; row < 256 / (bh + gap) + 1; row++) {
+      const offset = (row % 2) ? bw / 2 : 0;
+      for (let col = -1; col < 256 / bw + 1; col++) {
+        const px = col * bw + offset;
+        const py = row * (bh + gap);
+        const shade = 165 + Math.floor(Math.random() * 30);
+        const r = shade + 35, g = shade - 30, b = shade - 60;
+        x.fillStyle = `rgb(${r},${Math.max(50,g)},${Math.max(40,b)})`;
+        x.fillRect(px, py, bw - gap, bh);
+        // Subtle highlight
+        x.fillStyle = 'rgba(255,255,255,0.04)';
+        x.fillRect(px, py, bw - gap, 2);
+      }
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(6, 2);
+    return tex;
+  },
+
+  /* ---- US flag + Maryland flag on two poles ---- */
+  addFlags(parentGroup) {
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0xd0d0d8, metalness: 0.7, roughness: 0.25 });
+
+    // Pole 1 — US flag (left of school)
+    const pole1 = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 16, 10), poleMat);
+    pole1.position.set(-12, 8, 14);
+    pole1.castShadow = true;
+    parentGroup.add(pole1);
+    const ballTop1 = new THREE.Mesh(
+      new THREE.SphereGeometry(0.4, 10, 10),
+      new THREE.MeshStandardMaterial({ color: 0xd4a73a, metalness: 0.8, roughness: 0.3 })
+    );
+    ballTop1.position.set(-12, 16.2, 14);
+    parentGroup.add(ballTop1);
+    const usFlag = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.5, 2.4),
+      new THREE.MeshStandardMaterial({ map: this.makeUSFlagTexture(), side: THREE.DoubleSide, roughness: 0.75 })
+    );
+    usFlag.position.set(-9.7, 14.5, 14);
+    usFlag.castShadow = true;
+    parentGroup.add(usFlag);
+    this.flag = usFlag; // primary flag for wave animation
+
+    // Pole 2 — Maryland state flag (right of school)
+    const pole2 = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 16, 10), poleMat);
+    pole2.position.set(12, 8, 14);
+    pole2.castShadow = true;
+    parentGroup.add(pole2);
+    const ballTop2 = new THREE.Mesh(
+      new THREE.SphereGeometry(0.4, 10, 10),
+      new THREE.MeshStandardMaterial({ color: 0xd4a73a, metalness: 0.8, roughness: 0.3 })
+    );
+    ballTop2.position.set(12, 16.2, 14);
+    parentGroup.add(ballTop2);
+    const mdFlag = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.5, 2.4),
+      new THREE.MeshStandardMaterial({ map: this.makeMDFlagTexture(), side: THREE.DoubleSide, roughness: 0.75 })
+    );
+    mdFlag.position.set(14.3, 14.5, 14);
+    mdFlag.castShadow = true;
+    parentGroup.add(mdFlag);
+    this.flag2 = mdFlag;
+  },
+
+  /* ---- US flag canvas texture ---- */
+  makeUSFlagTexture() {
+    const c = document.createElement('canvas');
+    c.width = 380; c.height = 200;
+    const x = c.getContext('2d');
+    const red = '#B22234';
+    const white = '#FFFFFF';
+    const blue = '#3C3B6E';
+    // 13 stripes
+    const stripeH = 200 / 13;
+    for (let i = 0; i < 13; i++) {
+      x.fillStyle = i % 2 === 0 ? red : white;
+      x.fillRect(0, i * stripeH, 380, stripeH + 0.5);
+    }
+    // Canton (blue rectangle covering top 7 stripes, 40% width)
+    const cantonW = 380 * 0.4;
+    const cantonH = stripeH * 7;
+    x.fillStyle = blue;
+    x.fillRect(0, 0, cantonW, cantonH);
+    // 50 stars — 9 rows alternating 6/5
+    x.fillStyle = white;
+    const rows = 9;
+    const starGapY = cantonH / (rows + 1);
+    for (let r = 0; r < rows; r++) {
+      const isLongRow = r % 2 === 0; // 0,2,4,6,8 → 6 stars; 1,3,5,7 → 5 stars
+      const count = isLongRow ? 6 : 5;
+      const totalSpan = cantonW * 0.85;
+      const startX = cantonW * 0.075 + (isLongRow ? 0 : (totalSpan / 11));
+      const gap = totalSpan / (count - 1 + (isLongRow ? 0 : 0));
+      for (let i = 0; i < count; i++) {
+        const cx = startX + i * (totalSpan / (count - 1 || 1));
+        const cy = starGapY * (r + 1);
+        this.drawStar(x, cx, cy, 3.5, 5);
+      }
+    }
+    const tex = new THREE.CanvasTexture(c);
+    return tex;
+  },
+
+  drawStar(ctx, cx, cy, r, points) {
+    ctx.beginPath();
+    for (let i = 0; i < points * 2; i++) {
+      const angle = (i * Math.PI) / points - Math.PI / 2;
+      const radius = i % 2 === 0 ? r : r * 0.4;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  },
+
+  /* ---- Maryland state flag canvas texture (approximate but recognizable) ---- */
+  makeMDFlagTexture() {
+    const c = document.createElement('canvas');
+    c.width = 360; c.height = 240;
+    const x = c.getContext('2d');
+    const gold = '#FFD200';
+    const black = '#000000';
+    const red = '#E03A3E';
+    const white = '#FFFFFF';
+    const qw = 180, qh = 120;
+
+    // ---- Calvert quadrants (top-left + bottom-right): paly of 6 gold/black with diagonal bend ----
+    const drawCalvert = (ox, oy) => {
+      // 6 vertical stripes
+      for (let i = 0; i < 6; i++) {
+        x.fillStyle = i % 2 === 0 ? gold : black;
+        x.fillRect(ox + i * (qw / 6), oy, qw / 6 + 0.5, qh);
+      }
+      // Diagonal bend (top-left to bottom-right) — colors counter-changed
+      x.save();
+      x.beginPath();
+      x.moveTo(ox, oy + qh * 0.25);
+      x.lineTo(ox + qw * 0.75, oy);
+      x.lineTo(ox + qw, oy + qh * 0.25);
+      x.lineTo(ox + qw * 0.25, oy + qh);
+      x.lineTo(ox, oy + qh * 0.75);
+      x.closePath();
+      x.clip();
+      for (let i = 0; i < 6; i++) {
+        x.fillStyle = i % 2 === 0 ? black : gold;
+        x.fillRect(ox + i * (qw / 6), oy, qw / 6 + 0.5, qh);
+      }
+      x.restore();
+    };
+
+    // ---- Crossland quadrants (top-right + bottom-left): quartered red/white with cross-bottony ----
+    const drawCrossland = (ox, oy) => {
+      // Quartered background (red + white in opposing corners)
+      x.fillStyle = red;
+      x.fillRect(ox, oy, qw / 2, qh / 2);
+      x.fillRect(ox + qw / 2, oy + qh / 2, qw / 2, qh / 2);
+      x.fillStyle = white;
+      x.fillRect(ox + qw / 2, oy, qw / 2, qh / 2);
+      x.fillRect(ox, oy + qh / 2, qw / 2, qh / 2);
+      // Cross bottony (stylized + with trefoil ends), color counter-changed
+      const cx = ox + qw / 2, cy = oy + qh / 2;
+      const armLen = qw * 0.35;
+      const armW = qh * 0.18;
+      // Helper to draw a counter-changed rectangle: split into quadrant-colored halves
+      const drawCC = (rx, ry, rw, rh) => {
+        // For each pixel-block region, color is opposite of underlying quadrant
+        // Approximate: split rect into 4 sub-quadrants relative to cross center
+        // Top-left of overall (cy-top half, cx-left half): underlying = white; CC = red
+        // Top-right (cy-top, cx-right): underlying = red; CC = white
+        // Bottom-left: underlying = red; CC = white
+        // Bottom-right: underlying = white; CC = red
+        // We'll iterate by splitting
+        const left = Math.max(rx, ox), right = Math.min(rx + rw, ox + qw);
+        const top = Math.max(ry, oy),  bot = Math.min(ry + rh, oy + qh);
+        for (const [sx, sy, ex, ey] of [[left, top, Math.min(right, cx), Math.min(bot, cy)],
+                                         [Math.max(left, cx), top, right, Math.min(bot, cy)],
+                                         [left, Math.max(top, cy), Math.min(right, cx), bot],
+                                         [Math.max(left, cx), Math.max(top, cy), right, bot]]) {
+          if (ex <= sx || ey <= sy) continue;
+          const isTopLeft = sx < cx && sy < cy;
+          const isBotRight = sx >= cx && sy >= cy;
+          // Underlying color: TL=white,TR=red,BL=red,BR=white. CC inverts.
+          const underWhite = isTopLeft || isBotRight;
+          x.fillStyle = underWhite ? red : white;
+          x.fillRect(sx, sy, ex - sx, ey - sy);
+        }
+      };
+      // Horizontal arm
+      drawCC(cx - armLen, cy - armW / 2, armLen * 2, armW);
+      // Vertical arm
+      drawCC(cx - armW / 2, cy - armLen, armW, armLen * 2);
+      // Trefoil circles at each arm end (cross-bottony ends)
+      const drawCCCircle = (px, py, rad) => {
+        // Approximate by drawing the four-quadrant rect that contains it
+        // Easier: just paint solid color based on which quadrant it's in
+        x.save();
+        x.beginPath();
+        x.arc(px, py, rad, 0, Math.PI * 2);
+        x.clip();
+        const isTopLeft = px < cx && py < cy;
+        const isBotRight = px >= cx && py >= cy;
+        const underWhite = isTopLeft || isBotRight;
+        x.fillStyle = underWhite ? red : white;
+        x.fillRect(px - rad - 1, py - rad - 1, rad * 2 + 2, rad * 2 + 2);
+        x.restore();
+      };
+      const ts = armW * 0.55;
+      // North trefoil cluster
+      drawCCCircle(cx, cy - armLen, ts);
+      drawCCCircle(cx - ts * 1.2, cy - armLen + ts * 0.4, ts);
+      drawCCCircle(cx + ts * 1.2, cy - armLen + ts * 0.4, ts);
+      // South
+      drawCCCircle(cx, cy + armLen, ts);
+      drawCCCircle(cx - ts * 1.2, cy + armLen - ts * 0.4, ts);
+      drawCCCircle(cx + ts * 1.2, cy + armLen - ts * 0.4, ts);
+      // West
+      drawCCCircle(cx - armLen, cy, ts);
+      drawCCCircle(cx - armLen + ts * 0.4, cy - ts * 1.2, ts);
+      drawCCCircle(cx - armLen + ts * 0.4, cy + ts * 1.2, ts);
+      // East
+      drawCCCircle(cx + armLen, cy, ts);
+      drawCCCircle(cx + armLen - ts * 0.4, cy - ts * 1.2, ts);
+      drawCCCircle(cx + armLen - ts * 0.4, cy + ts * 1.2, ts);
+    };
+
+    drawCalvert(0, 0);
+    drawCrossland(qw, 0);
+    drawCrossland(0, qh);
+    drawCalvert(qw, qh);
+
+    return new THREE.CanvasTexture(c);
   },
 
   buildZoneMarkers() {
@@ -2547,6 +3002,149 @@ const Yard = {
     post.position.set(-28, 1.5, 13);
     post.castShadow = true;
     this.scene.add(post);
+
+    // STOP sign at the exit gate (red octagon on a pole)
+    const stopGroup = new THREE.Group();
+    const stopPole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.1, 0.1, 4, 8),
+      new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.5 })
+    );
+    stopPole.position.set(0, 2, 0);
+    stopGroup.add(stopPole);
+    const stopC = document.createElement('canvas');
+    stopC.width = 256; stopC.height = 256;
+    const sctx3 = stopC.getContext('2d');
+    sctx3.fillStyle = '#cc1111';
+    sctx3.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI / 4) - Math.PI / 8;
+      const px = 128 + Math.cos(a) * 120, py = 128 + Math.sin(a) * 120;
+      i === 0 ? sctx3.moveTo(px, py) : sctx3.lineTo(px, py);
+    }
+    sctx3.closePath(); sctx3.fill();
+    sctx3.strokeStyle = '#ffffff'; sctx3.lineWidth = 8; sctx3.stroke();
+    sctx3.fillStyle = '#ffffff';
+    sctx3.font = 'bold 70px sans-serif';
+    sctx3.textAlign = 'center'; sctx3.textBaseline = 'middle';
+    sctx3.fillText('STOP', 128, 138);
+    const stopTex2 = new THREE.CanvasTexture(stopC);
+    const stopSign = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.MeshBasicMaterial({ map: stopTex2, transparent: true, side: THREE.DoubleSide })
+    );
+    stopSign.position.set(0, 4.5, 0);
+    stopGroup.add(stopSign);
+    stopGroup.position.set(28, 0, 18);
+    this.scene.add(stopGroup);
+
+    // Painted yellow parking-bay stripes for each depot slot (8 bays)
+    for (let i = 0; i < 7; i++) {
+      const bayLine = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.3, 5.5),
+        new THREE.MeshBasicMaterial({ color: 0xf5d653 })
+      );
+      bayLine.rotation.x = -Math.PI / 2;
+      bayLine.position.set(-18 + i * 6, 0.026, -39);
+      this.scene.add(bayLine);
+    }
+    // Bay numbers — small white squares
+    for (let i = 0; i < 7; i++) {
+      const num = document.createElement('canvas');
+      num.width = 64; num.height = 64;
+      const nctx = num.getContext('2d');
+      nctx.fillStyle = '#fff8e0';
+      nctx.fillRect(0, 0, 64, 64);
+      nctx.fillStyle = '#1a1a1a';
+      nctx.font = 'bold 42px sans-serif';
+      nctx.textAlign = 'center'; nctx.textBaseline = 'middle';
+      nctx.fillText(String(i + 1), 32, 36);
+      const ntex = new THREE.CanvasTexture(num);
+      const numMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.3, 1.3),
+        new THREE.MeshBasicMaterial({ map: ntex })
+      );
+      numMesh.rotation.x = -Math.PI / 2;
+      numMesh.position.set(-15 + i * 6, 0.027, -36.5);
+      this.scene.add(numMesh);
+    }
+  },
+
+  /* ---- Sky details: sun + clouds ---- */
+  buildSkyDetails() {
+    // Sun disc — high up, warmly glowing
+    const sun = new THREE.Mesh(
+      new THREE.CircleGeometry(8, 32),
+      new THREE.MeshBasicMaterial({ color: 0xfff0c0 })
+    );
+    sun.position.set(60, 75, -90);
+    sun.lookAt(0, 4, 0);
+    this.scene.add(sun);
+    // Sun halo
+    const halo = new THREE.Mesh(
+      new THREE.RingGeometry(8.5, 15, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd089, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+    );
+    halo.position.copy(sun.position);
+    halo.lookAt(0, 4, 0);
+    this.scene.add(halo);
+
+    // Clouds — 8 billboarded sprites at various positions
+    const cloudCanvas = document.createElement('canvas');
+    cloudCanvas.width = 256; cloudCanvas.height = 128;
+    const cctx = cloudCanvas.getContext('2d');
+    const grad = cctx.createRadialGradient(128, 64, 10, 128, 64, 100);
+    grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+    grad.addColorStop(0.6, 'rgba(255,250,240,0.5)');
+    grad.addColorStop(1, 'rgba(255,250,240,0)');
+    cctx.fillStyle = grad;
+    cctx.beginPath();
+    cctx.arc(80, 70, 35, 0, Math.PI * 2);
+    cctx.arc(120, 60, 45, 0, Math.PI * 2);
+    cctx.arc(170, 75, 35, 0, Math.PI * 2);
+    cctx.arc(100, 75, 40, 0, Math.PI * 2);
+    cctx.fill();
+    const cloudTex = new THREE.CanvasTexture(cloudCanvas);
+    for (let i = 0; i < 8; i++) {
+      const cloud = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.85, depthWrite: false }));
+      const sx = 18 + Math.random() * 10;
+      cloud.scale.set(sx, sx * 0.5, 1);
+      cloud.position.set(
+        (Math.random() - 0.5) * 200,
+        50 + Math.random() * 30,
+        -60 - Math.random() * 60
+      );
+      cloud.userData.driftSpeed = 0.005 + Math.random() * 0.01;
+      this.scene.add(cloud);
+      this.clouds.push(cloud);
+    }
+  },
+
+  /* ---- Compass rose (N/S/E/W) at edges of the ground ---- */
+  buildCompass() {
+    const makeLabel = (text, color) => {
+      const c = document.createElement('canvas');
+      c.width = 128; c.height = 128;
+      const cx = c.getContext('2d');
+      cx.fillStyle = 'rgba(0,0,0,0.55)';
+      cx.beginPath();
+      cx.arc(64, 64, 50, 0, Math.PI * 2);
+      cx.fill();
+      cx.strokeStyle = color;
+      cx.lineWidth = 4;
+      cx.stroke();
+      cx.fillStyle = color;
+      cx.font = 'bold 64px sans-serif';
+      cx.textAlign = 'center'; cx.textBaseline = 'middle';
+      cx.fillText(text, 64, 68);
+      const tex = new THREE.CanvasTexture(c);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+      sprite.scale.set(5, 5, 1);
+      return sprite;
+    };
+    const N = makeLabel('N', '#ff5577'); N.position.set(0, 1, -80); this.scene.add(N);
+    const S = makeLabel('S', '#ffffff'); S.position.set(0, 1,  80); this.scene.add(S);
+    const E = makeLabel('E', '#ffffff'); E.position.set(80, 1, 0); this.scene.add(E);
+    const W = makeLabel('W', '#ffffff'); W.position.set(-80, 1, 0); this.scene.add(W);
   },
 
   createBusMesh(item) {
@@ -2636,6 +3234,78 @@ const Yard = {
       brakes.push(b);
     }
 
+    // Black school-bus side stripe
+    for (const side of [1.111, -1.111]) {
+      const stripe = new THREE.Mesh(
+        new THREE.PlaneGeometry(5.4, 0.22),
+        new THREE.MeshBasicMaterial({ color: 0x111111 })
+      );
+      stripe.position.set(0, 1.6, side);
+      if (side < 0) stripe.rotation.y = Math.PI;
+      group.add(stripe);
+      const stripe2 = new THREE.Mesh(
+        new THREE.PlaneGeometry(5.4, 0.22),
+        new THREE.MeshBasicMaterial({ color: 0x111111 })
+      );
+      stripe2.position.set(0, 0.7, side);
+      if (side < 0) stripe2.rotation.y = Math.PI;
+      group.add(stripe2);
+    }
+
+    // Front grille bumper
+    const bumper = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.6, 2.2),
+      new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 })
+    );
+    bumper.position.set(4.05, 0.7, 0);
+    group.add(bumper);
+    // Rear bumper
+    const rbumper = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.6, 2.2),
+      new THREE.MeshStandardMaterial({ color: 0x222222 })
+    );
+    rbumper.position.set(-2.95, 0.7, 0);
+    group.add(rbumper);
+
+    // Stop sign arm (octagon, attached to the driver's side, swings out when stopped)
+    const stopArmPivot = new THREE.Group();
+    stopArmPivot.position.set(-0.5, 2.0, 1.11);
+    // Arm rod
+    const arm = new THREE.Mesh(
+      new THREE.BoxGeometry(0.15, 0.15, 1.5),
+      new THREE.MeshStandardMaterial({ color: 0x222222 })
+    );
+    arm.position.set(0, 0, 0.85);
+    stopArmPivot.add(arm);
+    // Stop sign octagon
+    const stopCanvas = document.createElement('canvas');
+    stopCanvas.width = 128; stopCanvas.height = 128;
+    const sctx2 = stopCanvas.getContext('2d');
+    sctx2.fillStyle = '#cc1111';
+    sctx2.beginPath();
+    const cx = 64, cy = 64, r = 60;
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI / 4) - Math.PI / 8;
+      const px = cx + Math.cos(a) * r, py = cy + Math.sin(a) * r;
+      i === 0 ? sctx2.moveTo(px, py) : sctx2.lineTo(px, py);
+    }
+    sctx2.closePath();
+    sctx2.fill();
+    sctx2.strokeStyle = '#ffffff'; sctx2.lineWidth = 4; sctx2.stroke();
+    sctx2.fillStyle = '#ffffff';
+    sctx2.font = 'bold 38px sans-serif';
+    sctx2.textAlign = 'center'; sctx2.textBaseline = 'middle';
+    sctx2.fillText('STOP', 64, 68);
+    const stopTex = new THREE.CanvasTexture(stopCanvas);
+    const stopSign = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.4, 1.4),
+      new THREE.MeshBasicMaterial({ map: stopTex, transparent: true, side: THREE.DoubleSide })
+    );
+    stopSign.position.set(0, 0, 1.6);
+    stopSign.rotation.y = Math.PI / 2;
+    stopArmPivot.add(stopSign);
+    group.add(stopArmPivot);
+
     // Glow ring under bus (Last Call yellow, Your Bus blue)
     const glow = new THREE.Mesh(
       new THREE.RingGeometry(2.8, 4.5, 32),
@@ -2666,7 +3336,15 @@ const Yard = {
     label.position.set(0, 5.5, 0);
     group.add(label);
 
-    group.userData = { itemId: item.id, item, glow, beam, puff, body, brakes, label, lookDir: 0 };
+    // Leader line from label down to bus roof
+    const leaderGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 5.0, 0),
+      new THREE.Vector3(0, 3.5, 0),
+    ]);
+    const leader = new THREE.Line(leaderGeo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45 }));
+    group.add(leader);
+
+    group.userData = { itemId: item.id, item, glow, beam, puff, body, brakes, label, leader, stopArm: stopArmPivot, stopArmT: 0, lookDir: 0, departureSlot: null };
     return group;
   },
 
@@ -2796,6 +3474,19 @@ const Yard = {
     return { x, z };
   },
 
+  /* ---- Assign a sticky exit slot to a newly-departed bus ----
+     Slots progress diagonally down the exit driveway. Each slot is unique
+     to the order in which buses departed, so existing slots never shift. ---- */
+  assignExitSlot(mesh) {
+    const slot = this.departureCounter++;
+    mesh.userData.departureSlot = slot;
+    // Diagonal stack along the exit driveway. Slot 0 is closest, higher slots
+    // are further down the driveway / off-scene.
+    const baseX = 38, baseZ = 28;
+    mesh.userData.targetX = baseX + slot * 6;
+    mesh.userData.targetZ = baseZ + slot * 5;
+  },
+
   syncFromState() {
     if (!this.initialized) return;
     const buses = state.items.filter(i => i.type === 'bus');
@@ -2812,18 +3503,36 @@ const Yard = {
         mesh = this.createBusMesh(item);
         this.scene.add(mesh);
         this.busMeshes[item.id] = mesh;
-        const peers = byStatus[item.status] || [item];
-        const idx = peers.findIndex(b => b.id === item.id);
-        const p = this.getZonePosition(item.status, idx, peers.length);
-        mesh.position.set(p.x, 0, p.z);
-        mesh.userData.targetX = p.x;
-        mesh.userData.targetZ = p.z;
+        // Initial spawn position
+        if (item.status === 'departed') {
+          // Edge case — item already departed when scene init: assign exit slot now
+          this.assignExitSlot(mesh);
+          mesh.position.set(mesh.userData.targetX, 0, mesh.userData.targetZ);
+        } else {
+          const peers = byStatus[item.status] || [item];
+          const idx = peers.findIndex(b => b.id === item.id);
+          const p = this.getZonePosition(item.status, idx, peers.length);
+          mesh.position.set(p.x, 0, p.z);
+          mesh.userData.targetX = p.x;
+          mesh.userData.targetZ = p.z;
+        }
       } else {
-        const peers = byStatus[item.status] || [item];
-        const idx = peers.findIndex(b => b.id === item.id);
-        const p = this.getZonePosition(item.status, idx, peers.length);
-        mesh.userData.targetX = p.x;
-        mesh.userData.targetZ = p.z;
+        // CRITICAL: sticky departure — once departed and slot is assigned, never recompute target.
+        // This prevents already-exiting buses from snapping back when another bus departs.
+        if (item.status === 'departed') {
+          if (mesh.userData.departureSlot == null) {
+            this.assignExitSlot(mesh);
+          }
+          // else: leave target alone — bus continues toward its locked exit slot
+        } else {
+          // Non-departed: clear any prior slot (e.g. if undone back to Last Call), recompute normally
+          mesh.userData.departureSlot = null;
+          const peers = byStatus[item.status] || [item];
+          const idx = peers.findIndex(b => b.id === item.id);
+          const p = this.getZonePosition(item.status, idx, peers.length);
+          mesh.userData.targetX = p.x;
+          mesh.userData.targetZ = p.z;
+        }
       }
       mesh.userData.item = item;
       // Face direction based on status
@@ -2832,7 +3541,7 @@ const Yard = {
       } else if (item.status === 'waiting') {
         mesh.userData.targetRotY = Math.PI; // facing south (toward school)
       } else if (item.status === 'departed') {
-        mesh.userData.targetRotY = -0.5; // angled toward exit
+        mesh.userData.targetRotY = -0.6; // angled toward exit driveway
       } else {
         mesh.userData.targetRotY = 0;
       }
@@ -2853,6 +3562,31 @@ const Yard = {
 
     // Update the live status HUD
     this.updateHud();
+    // Update the activity ticker
+    this.updateTicker();
+  },
+
+  /* ---- Activity ticker — last 5 status changes ---- */
+  updateTicker() {
+    const el = document.getElementById('yardTicker');
+    if (!el) return;
+    const recent = (state.logs || []).slice(0, 5);
+    if (recent.length === 0) {
+      el.innerHTML = '<div class="yard-ticker-title">Recent Activity</div><div class="yard-ticker-empty">No changes yet today.</div>';
+      return;
+    }
+    const lastSig = el.dataset.lastSig || '';
+    const sig = recent.map(r => r.id).join('|');
+    el.innerHTML = '<div class="yard-ticker-title">Recent Activity</div>' +
+      recent.map((r, i) => `
+        <div class="yard-ticker-row ${i === 0 && lastSig !== sig ? 'fresh' : ''}">
+          <span class="t">${formatTimeShort(r.changed_at)}</span>
+          <span class="item">${r.item_name}</span>
+          <span class="arrow">→</span>
+          <span class="ns s-${r.new_status}">${statusLabel(r.new_status)}</span>
+        </div>
+      `).join('');
+    el.dataset.lastSig = sig;
   },
 
   animate() {
@@ -2906,24 +3640,20 @@ const Yard = {
         beam.material.opacity = Math.max(0, beam.material.opacity - 0.02);
       }
 
-      // Departed: drift off-scene, brake lights glow red, fade body to translucent
+      // Departed: brake lights pulse red, body fades to translucent.
+      // No continuous drift — the bus drives once to its locked exit slot and parks there.
       if (item.status === 'departed') {
-        mesh.userData.targetX += 0.05;
-        mesh.userData.targetZ += 0.04;
-        // Brake lights on
         if (mesh.userData.brakes) {
           mesh.userData.brakes.forEach(b => {
             b.material.opacity = 0.6 + Math.sin(t * 5) * 0.3;
             b.material.color.set(0xff2200);
           });
         }
-        // Body translucent
         if (mesh.userData.body && mesh.userData.body.material) {
           mesh.userData.body.material.transparent = true;
-          mesh.userData.body.material.opacity = Math.max(0.35, mesh.userData.body.material.opacity * 0.998);
+          mesh.userData.body.material.opacity = Math.max(0.4, mesh.userData.body.material.opacity * 0.998);
         }
       } else {
-        // Brake lights off, body restored
         if (mesh.userData.brakes) {
           mesh.userData.brakes.forEach(b => { b.material.opacity = Math.max(0, b.material.opacity - 0.05); });
         }
@@ -2931,6 +3661,13 @@ const Yard = {
           mesh.userData.body.material.opacity = Math.min(1, (mesh.userData.body.material.opacity || 1) + 0.02);
           if (mesh.userData.body.material.opacity >= 0.99) mesh.userData.body.material.transparent = false;
         }
+      }
+
+      // Stop sign arm extends out when bus is in Arrived / Last Call
+      if (mesh.userData.stopArm) {
+        const want = (item.status === 'arrived' || item.status === 'last_call') ? 1 : 0;
+        mesh.userData.stopArmT = (mesh.userData.stopArmT || 0) + (want - (mesh.userData.stopArmT || 0)) * 0.08;
+        mesh.userData.stopArm.rotation.y = mesh.userData.stopArmT * Math.PI / 2;
       }
     });
 
@@ -2940,15 +3677,53 @@ const Yard = {
       this.flag.scale.x = 1 + Math.sin(t * 2.2) * 0.04;
     }
 
-    // No auto-orbit — user drives the camera. Update sprite labels' look-at and pulse effects.
-    Object.values(this.busMeshes).forEach(mesh => {
-      if (mesh.userData.label) {
-        // Sprites auto-face camera; just keep position stable above bus
-        mesh.userData.label.position.set(0, 5.5, 0);
-      }
+    // Drive camera preset tween if active
+    if (this.tween) this.stepTween();
+
+    // Cluster-aware label heights — stagger so labels don't overlap when buses are close
+    this.updateLabelHeights();
+
+    // Drift clouds slowly across the sky
+    this.clouds.forEach(cloud => {
+      cloud.position.x += cloud.userData.driftSpeed;
+      if (cloud.position.x > 110) cloud.position.x = -110;
     });
 
     this.renderer.render(this.scene, this.camera);
+  },
+
+  /* ---- Stagger label heights when buses are spatially close ---- */
+  updateLabelHeights() {
+    const meshes = Object.values(this.busMeshes);
+    // Bucket buses by approximate grid cells (so clusters share a bucket)
+    const buckets = new Map();
+    for (const m of meshes) {
+      const cx = Math.floor(m.position.x / 6);
+      const cz = Math.floor(m.position.z / 5);
+      const key = cx + ',' + cz;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(m);
+    }
+    for (const arr of buckets.values()) {
+      // Sort by sort_order to keep stagger deterministic
+      arr.sort((a, b) => (a.userData.item.sort_order || 0) - (b.userData.item.sort_order || 0));
+      arr.forEach((m, i) => {
+        if (!m.userData.label) return;
+        const baseY = 5.5;
+        const stagger = i * 1.4;
+        const targetY = baseY + stagger;
+        // Smooth follow
+        m.userData.label.position.y += (targetY - m.userData.label.position.y) * 0.1;
+        // Update leader line endpoints (bus top → label bottom)
+        if (m.userData.leader) {
+          const pts = [
+            new THREE.Vector3(0, m.userData.label.position.y - 1.3, 0),
+            new THREE.Vector3(0, 3.5, 0),
+          ];
+          m.userData.leader.geometry.setFromPoints(pts);
+        }
+      });
+    }
   },
 
   /* ---- Live status HUD (counts per status) ---- */
