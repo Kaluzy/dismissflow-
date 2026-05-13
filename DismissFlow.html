@@ -796,6 +796,110 @@
   }
   .yard-loading.hidden { display: none; }
 
+  /* Live status HUD top-right */
+  .yard-hud {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: rgba(10,15,25,0.78);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 12px 14px;
+    color: #fff;
+    font-size: 13px;
+    min-width: 200px;
+    pointer-events: none;
+  }
+  .yard-hud-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent);
+    font-weight: 800;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .yard-hud-title::before {
+    content: '';
+    display: inline-block;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--good);
+    animation: live-dot-pulse 2s infinite;
+  }
+  .yard-hud-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+  .yard-hud-row:first-of-type { border-top: none; }
+  .yard-hud-row .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .yard-hud-row .label { flex: 1; color: #cbd5e1; font-size: 13px; }
+  .yard-hud-row .count { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; }
+  .yard-hud-row.is-zero .label,
+  .yard-hud-row.is-zero .count { opacity: 0.35; }
+  .yard-hud-row.is-active { color: #fff; }
+  .yard-hud-row.is-active .label { color: #fff; font-weight: 600; }
+
+  /* Camera control bar bottom-center */
+  .yard-controls {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 6px;
+    background: rgba(10,15,25,0.78);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 6px;
+  }
+  .yard-controls button {
+    background: transparent;
+    color: #cbd5e1;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .yard-controls button:hover { background: rgba(255,255,255,0.06); color: #fff; }
+  .yard-controls button.active {
+    background: rgba(76,195,255,0.15);
+    color: var(--accent);
+    border-color: rgba(76,195,255,0.3);
+  }
+  .yard-controls .sep {
+    width: 1px;
+    background: rgba(255,255,255,0.08);
+    margin: 4px 2px;
+  }
+  .yard-hint {
+    position: absolute;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10,15,25,0.65);
+    color: rgba(255,255,255,0.7);
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+    pointer-events: none;
+  }
+  @media (max-width: 600px) {
+    .yard-legend, .yard-hud { font-size: 11px; padding: 10px; }
+    .yard-legend { max-width: 180px; }
+    .yard-hud { min-width: 160px; }
+  }
+
   /* ---------- View visibility ---------- */
   .view { display: none; }
   .view.active { display: block; }
@@ -883,7 +987,18 @@
         <div class="yard-legend-row"><span class="yz-dot" style="background:#94a3b8;opacity:0.5"></span> Departed</div>
         <div class="yard-legend-hint">Tap a bus for status &amp; actions</div>
       </div>
+      <div class="yard-hud" id="yardHud"></div>
       <div class="yard-info-panel" id="yardInfoPanel"></div>
+      <div class="yard-hint">Drag to rotate · Pinch / scroll to zoom · Tap a bus for actions</div>
+      <div class="yard-controls">
+        <button id="yardViewDefault" class="active" title="Default isometric">Default</button>
+        <button id="yardViewTop" title="Top-down map view">Top</button>
+        <button id="yardViewFront" title="Front of school">Front</button>
+        <button id="yardViewSide" title="Side view">Side</button>
+        <span class="sep"></span>
+        <button id="yardZoomIn" title="Zoom in">+</button>
+        <button id="yardZoomOut" title="Zoom out">−</button>
+      </div>
       <div class="yard-loading" id="yardLoading">Loading 3D scene…</div>
     </div>
   </section>
@@ -1960,7 +2075,24 @@ const Yard = {
   busMeshes: {}, schoolGroup: null, flag: null, students: [],
   raycaster: null, mouse: null,
   animFrame: null, initialized: false, active: false,
-  cameraAngle: 0,
+
+  // Manual orbit camera state (spherical around target)
+  cam: {
+    theta: Math.PI / 4,        // horizontal angle (around Y)
+    phi: Math.PI / 4.5,        // vertical angle (0 = top, PI/2 = horizon)
+    radius: 95,
+    zoom: 1,
+    target: null,              // THREE.Vector3, set in init
+  },
+  // Pointer/touch interaction state
+  drag: { active: false, lastX: 0, lastY: 0, dist: 0, pinchD: 0 },
+  presets: {
+    default: { theta: Math.PI / 4,      phi: Math.PI / 4.5, zoom: 1   },
+    top:     { theta: 0,                 phi: 0.05,           zoom: 1   },
+    front:   { theta: 0,                 phi: Math.PI / 2.4, zoom: 1.1 },
+    side:    { theta: Math.PI / 2,       phi: Math.PI / 2.4, zoom: 1.1 },
+  },
+  currentPreset: 'default',
 
   // Physical zones in world coordinates (Z = north/south, X = east/west)
   ZONES: {
@@ -2022,14 +2154,130 @@ const Yard = {
 
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
-    this.canvas.addEventListener('click', e => this.onClick(e));
-    this.canvas.addEventListener('mousemove', e => this.onHover(e));
+    this.cam.target = new THREE.Vector3(0, 4, 0);
+    this.updateCameraFromOrbit();
 
+    this.wireOrbitControls();
     window.addEventListener('resize', () => this.onResize());
 
     this.initialized = true;
     document.getElementById('yardLoading').classList.add('hidden');
     this.syncFromState();
+  },
+
+  /* ---- Orbit controls (mouse + touch, no extra deps) ---- */
+  wireOrbitControls() {
+    const c = this.canvas;
+    // Mouse / single-touch via Pointer Events
+    c.addEventListener('pointerdown', e => this.onPointerDown(e));
+    c.addEventListener('pointermove', e => this.onPointerMove(e));
+    c.addEventListener('pointerup',   e => this.onPointerUp(e));
+    c.addEventListener('pointercancel', e => this.onPointerUp(e));
+    c.addEventListener('wheel', e => this.onWheel(e), { passive: false });
+    // Two-finger pinch — use Touch Events to track two simultaneous touches
+    c.addEventListener('touchstart', e => this.onTouchStart(e), { passive: false });
+    c.addEventListener('touchmove',  e => this.onTouchMove(e),  { passive: false });
+    c.addEventListener('touchend',   e => this.onTouchEnd(e));
+    c.addEventListener('contextmenu', e => e.preventDefault());
+    c.addEventListener('mousemove', e => this.onHover(e));
+  },
+
+  updateCameraFromOrbit() {
+    const { theta, phi, radius, target, zoom } = this.cam;
+    // Clamp phi so we don't flip
+    const p = Math.max(0.02, Math.min(Math.PI / 2 - 0.02, phi));
+    this.cam.phi = p;
+    this.camera.position.set(
+      target.x + Math.sin(theta) * Math.cos(p) * radius,
+      target.y + Math.sin(p) * radius,
+      target.z + Math.cos(theta) * Math.cos(p) * radius
+    );
+    this.camera.lookAt(target);
+    this.camera.zoom = zoom;
+    this.camera.updateProjectionMatrix();
+  },
+
+  onPointerDown(e) {
+    if (e.pointerType === 'touch' && e.isPrimary === false) return;
+    this.drag.active = true;
+    this.drag.lastX = e.clientX;
+    this.drag.lastY = e.clientY;
+    this.drag.dist = 0;
+    this.canvas.setPointerCapture(e.pointerId);
+  },
+
+  onPointerMove(e) {
+    if (!this.drag.active) return;
+    const dx = e.clientX - this.drag.lastX;
+    const dy = e.clientY - this.drag.lastY;
+    this.drag.dist += Math.abs(dx) + Math.abs(dy);
+    this.drag.lastX = e.clientX;
+    this.drag.lastY = e.clientY;
+    this.cam.theta -= dx * 0.006;
+    this.cam.phi   -= dy * 0.005;
+    this.updateCameraFromOrbit();
+    this.setPresetActive(null);  // user took manual control
+  },
+
+  onPointerUp(e) {
+    if (this.drag.active && this.drag.dist < 6) {
+      // Treat as a click — fire raycast
+      this.onClick(e);
+    }
+    this.drag.active = false;
+    try { this.canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+  },
+
+  onWheel(e) {
+    e.preventDefault();
+    const factor = 1 - Math.sign(e.deltaY) * 0.12;
+    this.cam.zoom = Math.max(0.5, Math.min(3.5, this.cam.zoom * factor));
+    this.updateCameraFromOrbit();
+  },
+
+  onTouchStart(e) {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      this.drag.pinchD = Math.sqrt(dx*dx + dy*dy);
+      this.drag.active = false; // not a rotate
+    }
+  },
+  onTouchMove(e) {
+    if (e.touches.length === 2 && this.drag.pinchD > 0) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      const ratio = d / this.drag.pinchD;
+      this.cam.zoom = Math.max(0.5, Math.min(3.5, this.cam.zoom * ratio));
+      this.drag.pinchD = d;
+      this.updateCameraFromOrbit();
+    }
+  },
+  onTouchEnd(e) {
+    if (e.touches.length < 2) this.drag.pinchD = 0;
+  },
+
+  setPreset(name) {
+    const p = this.presets[name];
+    if (!p) return;
+    this.cam.theta = p.theta;
+    this.cam.phi   = p.phi;
+    this.cam.zoom  = p.zoom;
+    this.updateCameraFromOrbit();
+    this.setPresetActive(name);
+  },
+  setPresetActive(name) {
+    this.currentPreset = name;
+    document.querySelectorAll('.yard-controls button[id^="yardView"]').forEach(b => {
+      const k = (b.id.replace('yardView','')).toLowerCase();
+      b.classList.toggle('active', k === name);
+    });
+  },
+  zoom(factor) {
+    this.cam.zoom = Math.max(0.5, Math.min(3.5, this.cam.zoom * factor));
+    this.updateCameraFromOrbit();
   },
 
   buildGround() {
@@ -2109,13 +2357,80 @@ const Yard = {
     door.position.set(0, 2.25, 6.7);
     group.add(door);
 
-    // Sign above door
+    // "MAIN ENTRANCE" sign above the front door — clearly identifies front
+    const signCanvas = document.createElement('canvas');
+    signCanvas.width = 1024; signCanvas.height = 192;
+    const sctx = signCanvas.getContext('2d');
+    sctx.fillStyle = '#fff8e7';
+    sctx.fillRect(0, 0, 1024, 192);
+    sctx.strokeStyle = '#5d3a24';
+    sctx.lineWidth = 8;
+    sctx.strokeRect(8, 8, 1008, 176);
+    sctx.fillStyle = '#2a1a08';
+    sctx.font = 'bold 92px -apple-system, "Segoe UI", sans-serif';
+    sctx.textAlign = 'center';
+    sctx.textBaseline = 'middle';
+    sctx.fillText('MAIN ENTRANCE', 512, 96);
+    const signTex = new THREE.CanvasTexture(signCanvas);
     const sign = new THREE.Mesh(
-      new THREE.BoxGeometry(7, 1, 0.4),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.3 })
+      new THREE.PlaneGeometry(10, 1.8),
+      new THREE.MeshStandardMaterial({ map: signTex, emissive: 0xffffff, emissiveIntensity: 0.15, emissiveMap: signTex })
     );
-    sign.position.set(0, 5.5, 6.7);
+    sign.position.set(0, 6, 6.55);
     group.add(sign);
+
+    // Sidewalk from front door out to the loading curb
+    const sidewalk = new THREE.Mesh(
+      new THREE.PlaneGeometry(4, 4),
+      new THREE.MeshStandardMaterial({ color: 0xcfc7b8, roughness: 0.95 })
+    );
+    sidewalk.rotation.x = -Math.PI / 2;
+    sidewalk.position.set(0, 0.018, 8);
+    sidewalk.receiveShadow = true;
+    this.scene.add(sidewalk);
+
+    // Back side — service door + loading dock + dumpster (clearly the back of the school)
+    const backDoor = new THREE.Mesh(
+      new THREE.BoxGeometry(4, 4, 0.4),
+      new THREE.MeshStandardMaterial({ color: 0x8a6e54 })
+    );
+    backDoor.position.set(0, 2, -6.7);
+    group.add(backDoor);
+    const dock = new THREE.Mesh(
+      new THREE.BoxGeometry(8, 1, 3),
+      new THREE.MeshStandardMaterial({ color: 0x4a4a4a })
+    );
+    dock.position.set(0, 0.5, -8.5);
+    dock.castShadow = true;
+    dock.receiveShadow = true;
+    group.add(dock);
+    const dumpster = new THREE.Mesh(
+      new THREE.BoxGeometry(2.5, 1.8, 1.5),
+      new THREE.MeshStandardMaterial({ color: 0x3a5a3a })
+    );
+    dumpster.position.set(8, 0.9, -9);
+    dumpster.castShadow = true;
+    group.add(dumpster);
+
+    // Small "SERVICE" placard above back door
+    const backCanvas = document.createElement('canvas');
+    backCanvas.width = 256; backCanvas.height = 64;
+    const bctx = backCanvas.getContext('2d');
+    bctx.fillStyle = '#2a2a2a';
+    bctx.fillRect(0, 0, 256, 64);
+    bctx.fillStyle = '#e2e8f0';
+    bctx.font = 'bold 32px -apple-system, "Segoe UI", sans-serif';
+    bctx.textAlign = 'center';
+    bctx.textBaseline = 'middle';
+    bctx.fillText('SERVICE', 128, 32);
+    const backTex = new THREE.CanvasTexture(backCanvas);
+    const backSign = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.2, 0.8),
+      new THREE.MeshStandardMaterial({ map: backTex })
+    );
+    backSign.position.set(0, 5, -6.6);
+    backSign.rotation.y = Math.PI;
+    group.add(backSign);
 
     // Flagpole + flag
     const pole = new THREE.Mesh(
@@ -2309,6 +2624,18 @@ const Yard = {
       group.add(h);
     }
 
+    // Brake lights (rear, glow red when departed)
+    const brakeMat = new THREE.MeshBasicMaterial({ color: 0xff2200 });
+    const brakes = [];
+    for (const z of [-0.7, 0.7]) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), brakeMat.clone());
+      b.material.transparent = true;
+      b.material.opacity = 0.0;
+      b.position.set(-2.8, 1.5, z);
+      group.add(b);
+      brakes.push(b);
+    }
+
     // Glow ring under bus (Last Call yellow, Your Bus blue)
     const glow = new THREE.Mesh(
       new THREE.RingGeometry(2.8, 4.5, 32),
@@ -2334,8 +2661,128 @@ const Yard = {
     puff.position.set(-3.2, 1.6, 0);
     group.add(puff);
 
-    group.userData = { itemId: item.id, item, glow, beam, puff, body, lookDir: 0 };
+    // Floating label sprite above bus — shows name, route, and status
+    const label = this.makeLabelSprite(item);
+    label.position.set(0, 5.5, 0);
+    group.add(label);
+
+    group.userData = { itemId: item.id, item, glow, beam, puff, body, brakes, label, lookDir: 0 };
     return group;
+  },
+
+  /* ---- Sprite text label generator (canvas → texture → sprite) ---- */
+  makeLabelSprite(item) {
+    const text = item.name + (item.route ? '  ' + item.route : '');
+    const sub = this.labelStatusText(item.status);
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 192;
+    const ctx = canvas.getContext('2d');
+    // background pill
+    const padX = 24, padY = 16;
+    ctx.fillStyle = this.labelBgFor(item.status);
+    this.roundRect(ctx, padX, padY, canvas.width - padX*2, canvas.height - padY*2, 28);
+    ctx.fill();
+    // border
+    ctx.strokeStyle = this.labelBorderFor(item.status);
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    // text
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 56px -apple-system, "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2 - 18);
+    // sub status
+    ctx.fillStyle = this.labelSubColorFor(item.status);
+    ctx.font = 'bold 32px -apple-system, "Segoe UI", sans-serif';
+    ctx.fillText(sub, canvas.width / 2, canvas.height / 2 + 38);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(7, 2.6, 1);
+    sprite.userData = { canvas, ctx, tex, itemId: item.id };
+    return sprite;
+  },
+  updateLabelSprite(mesh, item) {
+    const sprite = mesh.userData.label;
+    if (!sprite) return;
+    const { canvas, ctx, tex } = sprite.userData;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const padX = 24, padY = 16;
+    ctx.fillStyle = this.labelBgFor(item.status);
+    this.roundRect(ctx, padX, padY, canvas.width - padX*2, canvas.height - padY*2, 28);
+    ctx.fill();
+    ctx.strokeStyle = this.labelBorderFor(item.status);
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 56px -apple-system, "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(item.name + (item.route ? '  ' + item.route : ''), canvas.width / 2, canvas.height / 2 - 18);
+    ctx.fillStyle = this.labelSubColorFor(item.status);
+    ctx.font = 'bold 32px -apple-system, "Segoe UI", sans-serif';
+    ctx.fillText(this.labelStatusText(item.status), canvas.width / 2, canvas.height / 2 + 38);
+    tex.needsUpdate = true;
+  },
+  labelStatusText(s) {
+    return ({
+      waiting:   'WAITING',
+      arrived:   '✓ RELEASING',
+      last_call: '⏰ LAST CALL',
+      departed:  '✈ EXITED',
+      delayed:   '◷ DELAYED',
+      issue:     '! ISSUE',
+      hold:      '⊘ HOLD',
+    })[s] || s.toUpperCase();
+  },
+  labelBgFor(s) {
+    return ({
+      waiting:   'rgba(15,20,30,0.85)',
+      arrived:   'rgba(6,40,28,0.92)',
+      last_call: 'rgba(48,32,8,0.92)',
+      departed:  'rgba(15,20,30,0.6)',
+      delayed:   'rgba(46,20,8,0.92)',
+      issue:     'rgba(46,8,8,0.92)',
+      hold:      'rgba(28,16,46,0.92)',
+    })[s] || 'rgba(15,20,30,0.85)';
+  },
+  labelBorderFor(s) {
+    return ({
+      waiting:   'rgba(255,255,255,0.18)',
+      arrived:   'rgba(52,211,153,0.7)',
+      last_call: 'rgba(251,191,36,0.8)',
+      departed:  'rgba(255,255,255,0.1)',
+      delayed:   'rgba(249,115,22,0.7)',
+      issue:     'rgba(239,68,68,0.8)',
+      hold:      'rgba(167,139,250,0.7)',
+    })[s] || 'rgba(255,255,255,0.18)';
+  },
+  labelSubColorFor(s) {
+    return ({
+      waiting:   '#94a3b8',
+      arrived:   '#86efac',
+      last_call: '#fcd34d',
+      departed:  '#94a3b8',
+      delayed:   '#fdba74',
+      issue:     '#fca5a5',
+      hold:      '#c4b5fd',
+    })[s] || '#94a3b8';
+  },
+  roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
   },
 
   getZonePosition(status, index, total) {
@@ -2391,6 +2838,11 @@ const Yard = {
       }
     });
 
+    // Refresh sprite labels for each bus (text + color reflect current status)
+    Object.values(this.busMeshes).forEach(mesh => {
+      this.updateLabelSprite(mesh, mesh.userData.item);
+    });
+
     // Remove orphan buses
     Object.keys(this.busMeshes).forEach(id => {
       if (!buses.find(b => b.id === id)) {
@@ -2398,6 +2850,9 @@ const Yard = {
         delete this.busMeshes[id];
       }
     });
+
+    // Update the live status HUD
+    this.updateHud();
   },
 
   animate() {
@@ -2451,10 +2906,31 @@ const Yard = {
         beam.material.opacity = Math.max(0, beam.material.opacity - 0.02);
       }
 
-      // Departed: drift further off-screen over time
+      // Departed: drift off-scene, brake lights glow red, fade body to translucent
       if (item.status === 'departed') {
         mesh.userData.targetX += 0.05;
         mesh.userData.targetZ += 0.04;
+        // Brake lights on
+        if (mesh.userData.brakes) {
+          mesh.userData.brakes.forEach(b => {
+            b.material.opacity = 0.6 + Math.sin(t * 5) * 0.3;
+            b.material.color.set(0xff2200);
+          });
+        }
+        // Body translucent
+        if (mesh.userData.body && mesh.userData.body.material) {
+          mesh.userData.body.material.transparent = true;
+          mesh.userData.body.material.opacity = Math.max(0.35, mesh.userData.body.material.opacity * 0.998);
+        }
+      } else {
+        // Brake lights off, body restored
+        if (mesh.userData.brakes) {
+          mesh.userData.brakes.forEach(b => { b.material.opacity = Math.max(0, b.material.opacity - 0.05); });
+        }
+        if (mesh.userData.body && mesh.userData.body.material) {
+          mesh.userData.body.material.opacity = Math.min(1, (mesh.userData.body.material.opacity || 1) + 0.02);
+          if (mesh.userData.body.material.opacity >= 0.99) mesh.userData.body.material.transparent = false;
+        }
       }
     });
 
@@ -2464,15 +2940,43 @@ const Yard = {
       this.flag.scale.x = 1 + Math.sin(t * 2.2) * 0.04;
     }
 
-    // Slow camera orbit (very subtle)
-    this.cameraAngle += 0.0008;
-    const r = 95;
-    this.camera.position.x = Math.cos(this.cameraAngle) * r;
-    this.camera.position.z = Math.sin(this.cameraAngle) * r;
-    this.camera.position.y = 65;
-    this.camera.lookAt(0, 4, 0);
+    // No auto-orbit — user drives the camera. Update sprite labels' look-at and pulse effects.
+    Object.values(this.busMeshes).forEach(mesh => {
+      if (mesh.userData.label) {
+        // Sprites auto-face camera; just keep position stable above bus
+        mesh.userData.label.position.set(0, 5.5, 0);
+      }
+    });
 
     this.renderer.render(this.scene, this.camera);
+  },
+
+  /* ---- Live status HUD (counts per status) ---- */
+  updateHud() {
+    const hud = document.getElementById('yardHud');
+    if (!hud) return;
+    const buses = state.items.filter(i => i.type === 'bus');
+    const counts = { arrived: 0, last_call: 0, waiting: 0, hold: 0, delayed: 0, issue: 0, departed: 0 };
+    buses.forEach(b => { counts[b.status] = (counts[b.status] || 0) + 1; });
+    const rows = [
+      { label: 'Releasing Now', key: 'arrived',   color: '#34d399' },
+      { label: 'Last Call',     key: 'last_call', color: '#fbbf24' },
+      { label: 'Waiting',       key: 'waiting',   color: '#94a3b8' },
+      { label: 'Hold',          key: 'hold',      color: '#a78bfa' },
+      { label: 'Delayed',       key: 'delayed',   color: '#f97316' },
+      { label: 'Issue',         key: 'issue',     color: '#ef4444' },
+      { label: 'Departed',      key: 'departed',  color: '#94a3b8' },
+    ];
+    hud.innerHTML = '<div class="yard-hud-title">Live Status</div>' +
+      rows.map(r => {
+        const n = counts[r.key] || 0;
+        const active = n > 0 && r.key !== 'departed' && r.key !== 'waiting';
+        return `<div class="yard-hud-row ${n === 0 ? 'is-zero' : ''} ${active ? 'is-active' : ''}">
+          <span class="dot" style="background:${r.color}"></span>
+          <span class="label">${r.label}</span>
+          <span class="count">${n}</span>
+        </div>`;
+      }).join('');
   },
 
   start() {
@@ -2612,6 +3116,17 @@ if (syncUrl) document.getElementById('syncUrlInput').value = syncUrl;
 
 // Sync indicator click jumps to setup
 document.getElementById('syncIndicator').onclick = () => setView('settings');
+
+// Yard camera-preset and zoom buttons
+['default','top','front','side'].forEach(name => {
+  const id = 'yardView' + name.charAt(0).toUpperCase() + name.slice(1);
+  const btn = document.getElementById(id);
+  if (btn) btn.onclick = () => Yard.setPreset(name);
+});
+const zin  = document.getElementById('yardZoomIn');
+const zout = document.getElementById('yardZoomOut');
+if (zin)  zin.onclick  = () => Yard.zoom(1.2);
+if (zout) zout.onclick = () => Yard.zoom(1/1.2);
 
 // Parent link — built from the current page URL
 const parentLink = window.location.origin + window.location.pathname + '?role=parent';
